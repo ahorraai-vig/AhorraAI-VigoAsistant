@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MapPin, Clock, Utensils, ShoppingBag, Palmtree, Landmark, Settings, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Send, MapPin, Clock, Utensils, ShoppingBag, Palmtree, Landmark, Settings, ArrowRight, Shield } from 'lucide-react';
 import { ChatConfig, ChatMessage } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -193,11 +194,12 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  if (step === 'config') {
-    const t = translations[config.language] || translations['Español'];
-    
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-800">
+  const renderContent = () => {
+    if (step === 'config') {
+      const t = translations[config.language] || translations['Español'];
+      
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-800">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100">
           <div className="p-8 text-center bg-blue-600 text-white">
             <h1 className="text-3xl font-bold mb-2 tracking-tight">{t.title}</h1>
@@ -264,11 +266,11 @@ export default function Chat() {
           </div>
         </div>
       </div>
-    );
-  }
+      );
+    }
 
-  return (
-    <div className="flex flex-col h-[100dvh] bg-slate-50 font-sans">
+    return (
+      <div className="flex flex-col h-[100dvh] bg-slate-50 font-sans">
       <header className="flex items-center justify-between p-4 bg-white border-b border-slate-200 shadow-sm sticky top-0 z-10">
         <div className="flex items-center space-x-2">
           <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold">
@@ -330,5 +332,19 @@ export default function Chat() {
         </form>
       </footer>
     </div>
+    );
+  };
+
+  return (
+    <>
+      {renderContent()}
+      <Link 
+        to="/admin" 
+        className="fixed bottom-4 right-4 p-2.5 text-slate-400 hover:text-slate-700 bg-white/60 hover:bg-white rounded-full shadow-sm backdrop-blur-md transition-all z-50 border border-slate-200"
+        title="Admin Panel"
+      >
+        <Shield size={18} />
+      </Link>
+    </>
   );
 }
