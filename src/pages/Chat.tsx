@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Send, MapPin, Clock, Utensils, ShoppingBag, Palmtree, Landmark, Settings, ArrowRight, Shield } from 'lucide-react';
+import { Send, MapPin, Clock, Utensils, ShoppingBag, Palmtree, Landmark, Settings, Shield, ChevronRight } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { ChatConfig, ChatMessage } from '../types';
 import { supabase } from '../lib/supabase';
 
 const translations: Record<string, any> = {
   'Español': {
     title: 'Asistente Vigo',
-    subtitle: 'Tu guía local interactiva',
+    subtitle: 'Tu guía local',
     timeLabel: 'Tiempo disponible',
     times: {
       'Pocas horas': 'Pocas horas',
@@ -22,13 +23,38 @@ const translations: Record<string, any> = {
       'Historia': 'Historia',
       'Playa': 'Playa'
     },
-    languageLabel: 'Idioma / Language',
-    startBtn: 'Comenzar a explorar',
+    languageLabel: 'Idioma',
+    languageTitle: 'Selecciona tu idioma',
+    startBtn: 'Continuar',
+    skipBtn: 'Prefiero escribir lo que busco',
     initialGreeting: '¡Hola! Soy tu asistente local de Vigo. ¿En qué te puedo ayudar hoy?'
+  },
+  'Galego': {
+    title: 'Asistente Vigo',
+    subtitle: 'A túa guía local',
+    timeLabel: 'Tempo dispoñible',
+    times: {
+      'Pocas horas': 'Poucas horas',
+      'Medio día': 'Medio día',
+      'Día completo': 'Día completo'
+    },
+    interestsLabel: 'Os teus intereses',
+    interests: {
+      'Comida': 'Comida',
+      'Vistas': 'Vistas',
+      'Compras': 'Compras',
+      'Historia': 'Historia',
+      'Playa': 'Praia'
+    },
+    languageLabel: 'Idioma',
+    languageTitle: 'Selecciona o teu idioma',
+    startBtn: 'Continuar',
+    skipBtn: 'Prefiro escribir o que busco',
+    initialGreeting: 'Ola! Son o teu asistente local de Vigo. En que te podo axudar hoxe?'
   },
   'English': {
     title: 'Vigo Assistant',
-    subtitle: 'Your interactive local guide',
+    subtitle: 'Your local guide',
     timeLabel: 'Available time',
     times: {
       'Pocas horas': 'A few hours',
@@ -44,12 +70,14 @@ const translations: Record<string, any> = {
       'Playa': 'Beaches'
     },
     languageLabel: 'Language',
-    startBtn: 'Start exploring',
+    languageTitle: 'Select your language',
+    startBtn: 'Continue',
+    skipBtn: 'I prefer to type what I need',
     initialGreeting: 'Hello! I am your local assistant from Vigo. How can I help you today?'
   },
   'Deutsch': {
     title: 'Vigo Assistent',
-    subtitle: 'Dein interaktiver Reiseführer',
+    subtitle: 'Dein Reiseführer',
     timeLabel: 'Verfügbare Zeit',
     times: {
       'Pocas horas': 'Ein paar Stunden',
@@ -64,13 +92,15 @@ const translations: Record<string, any> = {
       'Historia': 'Geschichte',
       'Playa': 'Strand'
     },
-    languageLabel: 'Sprache / Language',
-    startBtn: 'Erkundung beginnen',
+    languageLabel: 'Sprache',
+    languageTitle: 'Wähle deine Sprache',
+    startBtn: 'Weiter',
+    skipBtn: 'Ich tippe lieber, was ich suche',
     initialGreeting: 'Hallo! Ich bin dein lokaler Assistent aus Vigo. Wie kann ich dir heute helfen?'
   },
   'Français': {
     title: 'Assistant Vigo',
-    subtitle: 'Votre guide local interactif',
+    subtitle: 'Votre guide local',
     timeLabel: 'Temps disponible',
     times: {
       'Pocas horas': 'Quelques heures',
@@ -85,13 +115,15 @@ const translations: Record<string, any> = {
       'Historia': 'Histoire',
       'Playa': 'Plage'
     },
-    languageLabel: 'Langue / Language',
-    startBtn: 'Commencer à explorer',
+    languageLabel: 'Langue',
+    languageTitle: 'Sélectionnez votre langue',
+    startBtn: 'Continuer',
+    skipBtn: 'Je préfère écrire ce que je cherche',
     initialGreeting: 'Bonjour ! Je suis votre assistant local de Vigo. Comment puis-je vous aider aujourd\'hui ?'
   },
   'Português': {
     title: 'Assistente Vigo',
-    subtitle: 'Seu guia local interativo',
+    subtitle: 'Seu guia local',
     timeLabel: 'Tempo disponível',
     times: {
       'Pocas horas': 'Poucas horas',
@@ -106,14 +138,50 @@ const translations: Record<string, any> = {
       'Historia': 'História',
       'Playa': 'Praia'
     },
-    languageLabel: 'Idioma / Language',
-    startBtn: 'Começar a explorar',
+    languageLabel: 'Idioma',
+    languageTitle: 'Selecione seu idioma',
+    startBtn: 'Continuar',
+    skipBtn: 'Prefiro digitar o que procuro',
     initialGreeting: 'Olá! Sou o seu assistente local de Vigo. Como posso ajudá-lo hoje?'
+  },
+  'Italiano': {
+    title: 'Assistente Vigo',
+    subtitle: 'La tua guida locale',
+    timeLabel: 'Tempo a disposizione',
+    times: {
+      'Pocas horas': 'Poche ore',
+      'Medio día': 'Mezza giornata',
+      'Día completo': 'Giornata intera'
+    },
+    interestsLabel: 'I tuoi interessi',
+    interests: {
+      'Comida': 'Cibo',
+      'Vistas': 'Panorami',
+      'Compras': 'Shopping',
+      'Historia': 'Storia',
+      'Playa': 'Spiaggia'
+    },
+    languageLabel: 'Lingua',
+    languageTitle: 'Seleziona la tua lingua',
+    startBtn: 'Continua',
+    skipBtn: 'Preferisco scrivere cosa cerco',
+    initialGreeting: 'Ciao! Sono il tuo assistente locale di Vigo. Come posso aiutarti oggi?'
   }
 };
 
+const greetings = [
+  { text: 'Bienvenido a Vigo', lang: 'Español' },
+  { text: 'Benvido a Vigo', lang: 'Galego' },
+  { text: 'Welcome to Vigo', lang: 'English' },
+  { text: 'Bienvenue à Vigo', lang: 'Français' },
+  { text: 'Willkommen in Vigo', lang: 'Deutsch' },
+  { text: 'Bem-vindo a Vigo', lang: 'Português' },
+  { text: 'Benvenuto a Vigo', lang: 'Italiano' }
+];
+
 export default function Chat() {
-  const [step, setStep] = useState<'config' | 'chat'>('config');
+  const [step, setStep] = useState<'welcome' | 'language' | 'config' | 'chat'>('welcome');
+  const [greetingIndex, setGreetingIndex] = useState(0);
   const [config, setConfig] = useState<ChatConfig>({
     timeAvailable: '',
     interests: [],
@@ -124,6 +192,15 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (step === 'welcome') {
+      const interval = setInterval(() => {
+        setGreetingIndex((prev) => (prev + 1) % greetings.length);
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [step]);
 
   const toggleInterest = (interest: string) => {
     setConfig(prev => ({
@@ -137,16 +214,12 @@ export default function Chat() {
   const startChat = async () => {
     setStep('chat');
     
-    // Generar un ID de sesión simple
     const sessionId = Date.now().toString();
-
-    // Add initial greeting based on config
     const t = translations[config.language] || translations['Español'];
     const initialGreeting = t.initialGreeting;
       
     setMessages([{ id: sessionId, text: initialGreeting, isBot: true }]);
 
-    // Guardar métrica de la conversación en Supabase
     try {
       await supabase.from('conversations').insert({
         session_id: sessionId,
@@ -195,92 +268,183 @@ export default function Chat() {
   }, [messages]);
 
   const renderContent = () => {
+    if (step === 'welcome') {
+      return (
+        <div 
+          className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 relative cursor-pointer selection:bg-transparent"
+          onClick={() => setStep('language')}
+        >
+          <div className="flex-1 flex items-center justify-center w-full">
+            <AnimatePresence mode="wait">
+              <motion.h1
+                key={greetingIndex}
+                initial={{ opacity: 0, filter: 'blur(10px)', y: 10 }}
+                animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
+                exit={{ opacity: 0, filter: 'blur(10px)', y: -10 }}
+                transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+                className="text-4xl md:text-6xl font-light tracking-tight text-center"
+              >
+                {greetings[greetingIndex].text}
+              </motion.h1>
+            </AnimatePresence>
+          </div>
+          
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 1, duration: 1 }}
+            className="pb-12"
+          >
+            <p className="text-sm font-medium tracking-widest uppercase text-white/50 animate-pulse">
+              Toca para continuar
+            </p>
+          </motion.div>
+        </div>
+      );
+    }
+
+    if (step === 'language') {
+      // Usamos el título del idioma actual (español por defecto hasta que seleccione uno)
+      const t = translations[config.language] || translations['Español'];
+      return (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+          className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center"
+        >
+          <div className="w-full max-w-sm flex-1 flex flex-col justify-center">
+            <motion.h2 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.8 }}
+              className="text-2xl font-light tracking-tight text-center mb-10 text-white/80"
+            >
+              {t.languageTitle}
+            </motion.h2>
+            
+            <div className="space-y-3">
+              {Object.keys(translations).map((lang, idx) => (
+                <motion.button
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 + (idx * 0.05), duration: 0.6 }}
+                  key={lang}
+                  onClick={() => {
+                    setConfig({...config, language: lang});
+                    setStep('config');
+                  }}
+                  className="w-full py-4 px-6 rounded-2xl bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-all text-lg font-medium text-center shadow-lg"
+                >
+                  {lang}
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+      );
+    }
+
     if (step === 'config') {
       const t = translations[config.language] || translations['Español'];
       
       return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-800">
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100">
-          <div className="p-8 text-center bg-blue-600 text-white">
-            <h1 className="text-3xl font-bold mb-2 tracking-tight">{t.title}</h1>
-            <p className="text-blue-100 font-medium">{t.subtitle}</p>
-          </div>
-          
-          <div className="p-6 space-y-6">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-3 uppercase tracking-wider">{t.timeLabel}</label>
-              <div className="grid grid-cols-3 gap-2">
-                {['Pocas horas', 'Medio día', 'Día completo'].map(time => (
-                  <button 
-                    key={time}
-                    onClick={() => setConfig({...config, timeAvailable: time})}
-                    className={`p-2 text-sm rounded-lg border transition-all ${config.timeAvailable === time ? 'bg-blue-50 border-blue-600 text-blue-700 font-medium shadow-sm' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}
-                  >
-                    {t.times[time]}
-                  </button>
-                ))}
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+          className="min-h-screen bg-black flex flex-col p-4 md:p-8 font-sans text-white"
+        >
+          <div className="max-w-md w-full mx-auto flex-1 flex flex-col">
+            
+            <div className="text-center mt-8 mb-10">
+              <h1 className="text-3xl font-semibold tracking-tight text-white">{t.title}</h1>
+              <p className="text-white/50 mt-1">{t.subtitle}</p>
+            </div>
+            
+            <div className="flex-1 space-y-6 mb-8">
+              
+              <div className="bg-[#1C1C1E] rounded-[32px] p-6 shadow-xl">
+                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest pl-1 mb-4">{t.timeLabel}</label>
+                <div className="flex flex-col gap-2">
+                  {['Pocas horas', 'Medio día', 'Día completo'].map(time => (
+                    <button 
+                      key={time}
+                      onClick={() => setConfig({...config, timeAvailable: time})}
+                      className={`py-3.5 px-5 rounded-2xl text-left font-medium transition-all ${
+                        config.timeAvailable === time 
+                          ? 'bg-white text-black shadow-md' 
+                          : 'bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]'
+                      }`}
+                    >
+                      {t.times[time]}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              <div className="bg-[#1C1C1E] rounded-[32px] p-6 shadow-xl">
+                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest pl-1 mb-4">{t.interestsLabel}</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'Comida', icon: <Utensils size={16} className="mr-2 opacity-70" /> },
+                    { id: 'Vistas', icon: <MapPin size={16} className="mr-2 opacity-70" /> },
+                    { id: 'Compras', icon: <ShoppingBag size={16} className="mr-2 opacity-70" /> },
+                    { id: 'Historia', icon: <Landmark size={16} className="mr-2 opacity-70" /> },
+                    { id: 'Playa', icon: <Palmtree size={16} className="mr-2 opacity-70" /> }
+                  ].map(interest => (
+                    <button 
+                      key={interest.id}
+                      onClick={() => toggleInterest(interest.id)}
+                      className={`flex items-center px-4 py-2.5 rounded-full font-medium transition-all ${
+                        config.interests.includes(interest.id) 
+                          ? 'bg-white text-black shadow-md' 
+                          : 'bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]'
+                      }`}
+                    >
+                      {interest.icon} {t.interests[interest.id]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-3 uppercase tracking-wider">{t.interestsLabel}</label>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { id: 'Comida', icon: <Utensils size={14} className="mr-1" /> },
-                  { id: 'Vistas', icon: <MapPin size={14} className="mr-1" /> },
-                  { id: 'Compras', icon: <ShoppingBag size={14} className="mr-1" /> },
-                  { id: 'Historia', icon: <Landmark size={14} className="mr-1" /> },
-                  { id: 'Playa', icon: <Palmtree size={14} className="mr-1" /> }
-                ].map(interest => (
-                  <button 
-                    key={interest.id}
-                    onClick={() => toggleInterest(interest.id)}
-                    className={`flex items-center px-3 py-1.5 text-sm rounded-full border transition-all ${config.interests.includes(interest.id) ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-200' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}
-                  >
-                    {interest.icon} {t.interests[interest.id]}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-3 uppercase tracking-wider">{t.languageLabel}</label>
-              <select 
-                value={config.language} 
-                onChange={(e) => setConfig({...config, language: e.target.value})}
-                className="w-full p-2.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            <div className="mt-auto mb-4 flex flex-col gap-2">
+              <button 
+                onClick={startChat}
+                className="w-full flex items-center justify-center py-4 px-6 bg-white hover:bg-gray-200 active:scale-[0.98] text-black font-semibold rounded-full transition-all shadow-lg group"
               >
-                {['Español', 'English', 'Deutsch', 'Français', 'Português'].map(lang => (
-                  <option key={lang} value={lang}>{lang}</option>
-                ))}
-              </select>
+                {t.startBtn}
+              </button>
+              <button 
+                onClick={startChat}
+                className="w-full flex items-center justify-center py-4 px-6 bg-transparent hover:bg-white/5 active:scale-[0.98] text-white/60 hover:text-white font-medium rounded-full transition-all"
+              >
+                {t.skipBtn}
+              </button>
             </div>
-
-            <button 
-              onClick={startChat}
-              className="w-full flex items-center justify-center py-3.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-xl transition-all shadow-md mt-4 group"
-            >
-              {t.startBtn}
-              <ArrowRight size={18} className="ml-2 group-hover:translate-x-1 transition-transform" />
-            </button>
           </div>
-        </div>
-      </div>
+        </motion.div>
       );
     }
 
     return (
-      <div className="flex flex-col h-[100dvh] bg-slate-50 font-sans">
-      <header className="flex items-center justify-between p-4 bg-white border-b border-slate-200 shadow-sm sticky top-0 z-10">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex flex-col h-[100dvh] bg-black font-sans text-white"
+      >
+      <header className="flex items-center justify-between p-4 bg-[#1C1C1E]/80 backdrop-blur-md border-b border-white/10 shadow-sm sticky top-0 z-10">
         <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold">
+          <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-black font-bold">
             V
           </div>
-          <h1 className="text-lg font-bold text-slate-800">Asistente Vigo</h1>
+          <h1 className="text-lg font-semibold tracking-tight text-white">Asistente Vigo</h1>
         </div>
         <button 
           onClick={() => setStep('config')} 
-          className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-full transition-colors"
+          className="p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-colors"
         >
           <Settings size={20} />
         </button>
@@ -290,10 +454,10 @@ export default function Chat() {
         {messages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.isBot ? 'justify-start' : 'justify-end'}`}>
             <div 
-              className={`max-w-[85%] rounded-2xl px-5 py-3.5 shadow-sm leading-relaxed ${
+              className={`max-w-[85%] rounded-[20px] px-5 py-3.5 shadow-sm leading-relaxed ${
                 msg.isBot 
-                  ? 'bg-white text-slate-700 border border-slate-200 rounded-tl-sm' 
-                  : 'bg-blue-600 text-white rounded-tr-sm shadow-blue-200'
+                  ? 'bg-[#1C1C1E] text-[#EBEBF5] border border-white/5 rounded-tl-sm' 
+                  : 'bg-[#0A84FF] text-white rounded-tr-sm shadow-md'
               }`}
             >
               <p className="whitespace-pre-wrap">{msg.text}</p>
@@ -302,36 +466,36 @@ export default function Chat() {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-white text-slate-500 px-5 py-4 rounded-2xl border border-slate-200 rounded-tl-sm shadow-sm flex space-x-2 items-center">
-              <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" style={{animationDelay: '0.15s'}}></div>
-              <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" style={{animationDelay: '0.3s'}}></div>
+            <div className="bg-[#1C1C1E] text-white/50 px-5 py-4 rounded-[20px] border border-white/5 rounded-tl-sm shadow-sm flex space-x-2 items-center">
+              <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} className="w-1.5 h-1.5 bg-white/50 rounded-full"></motion.div>
+              <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} className="w-1.5 h-1.5 bg-white/50 rounded-full"></motion.div>
+              <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} className="w-1.5 h-1.5 bg-white/50 rounded-full"></motion.div>
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </main>
 
-      <footer className="p-4 bg-white border-t border-slate-200">
+      <footer className="p-4 bg-[#1C1C1E]/80 backdrop-blur-md border-t border-white/10">
         <form onSubmit={sendMessage} className="flex gap-2 max-w-4xl mx-auto relative">
           <input 
             type="text" 
             value={input} 
             onChange={(e) => setInput(e.target.value)}
             placeholder="Escribe tu mensaje..." 
-            className="flex-1 pl-4 pr-12 py-3.5 bg-white border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-700 shadow-sm"
+            className="flex-1 pl-5 pr-14 py-4 bg-black border border-white/10 rounded-full focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/30 transition-all text-white shadow-inner-sm placeholder:text-white/40"
             disabled={loading}
           />
           <button 
             type="submit" 
             disabled={!input.trim() || loading}
-            className="absolute right-2 top-2 bottom-2 aspect-square flex items-center justify-center bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors shadow-sm"
+            className="absolute right-2 top-2 bottom-2 aspect-square flex items-center justify-center bg-white text-black rounded-full hover:bg-gray-200 disabled:opacity-50 disabled:hover:bg-white transition-all shadow-md active:scale-95"
           >
             <Send size={18} className="ml-0.5" />
           </button>
         </form>
       </footer>
-    </div>
+    </motion.div>
     );
   };
 
@@ -340,10 +504,10 @@ export default function Chat() {
       {renderContent()}
       <Link 
         to="/admin" 
-        className="fixed bottom-4 right-4 p-2.5 text-slate-400 hover:text-slate-700 bg-white/60 hover:bg-white rounded-full shadow-sm backdrop-blur-md transition-all z-50 border border-slate-200"
+        className="fixed bottom-6 right-6 p-3 text-white/30 hover:text-white bg-white/10 hover:bg-white/20 rounded-full shadow-lg backdrop-blur-xl transition-all z-50 border border-white/10"
         title="Admin Panel"
       >
-        <Shield size={18} />
+        <Shield size={20} />
       </Link>
     </>
   );
