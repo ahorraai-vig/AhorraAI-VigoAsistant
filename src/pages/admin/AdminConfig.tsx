@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Key, Bot, Search, Save, CheckCircle, XCircle } from 'lucide-react';
+import { Key, Bot, Search, Save, CheckCircle, XCircle, Download } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 export default function AdminConfig() {
   const [activeTab, setActiveTab] = useState<'keys' | 'serpapi'>('keys');
@@ -9,6 +10,8 @@ export default function AdminConfig() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState<any>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
 
   useEffect(() => {
     fetch('/api/config/status')
@@ -21,6 +24,7 @@ export default function AdminConfig() {
     if (!searchQuery.trim()) return;
     setIsSearching(true);
     setSearchResult(null);
+    setImportMessage(null);
     try {
       const res = await fetch('/api/test-serpapi', {
         method: 'POST',
@@ -33,6 +37,59 @@ export default function AdminConfig() {
       setSearchResult({ error: e.message });
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  const handleImportBusinesses = async () => {
+    let rawResults = searchResult?.local_results || searchResult?.places_results;
+    let results: any[] = [];
+
+    if (Array.isArray(rawResults)) {
+      results = rawResults;
+    } else if (rawResults && Array.isArray(rawResults.places)) {
+      results = rawResults.places;
+    } else if (rawResults && typeof rawResults === 'object') {
+      results = [rawResults];
+    }
+
+    if (results.length === 0) {
+      setImportMessage({ type: 'error', text: 'No se encontraron resultados locales (local_results / places_results) válidos para importar en este JSON. Intenta añadir "en Vigo" a tu búsqueda.' });
+      return;
+    }
+    
+    setIsImporting(true);
+    setImportMessage(null);
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error("No estás autenticado o la sesión expiró.");
+      }
+
+      const businessesToInsert = results.map((place: any) => ({
+        name: place.title || 'Negocio Desconocido',
+        description: place.type || place.description || '',
+        address: place.address || '',
+        phone: place.phone || '',
+        website: place.links?.website || place.website || '',
+        latitude: place.gps_coordinates?.latitude || null,
+        longitude: place.gps_coordinates?.longitude || null,
+        opening_hours: place.operating_hours || {},
+        is_active: true,
+        owner_id: user.id
+      }));
+
+      const { error } = await supabase
+        .from('businesses')
+        .insert(businessesToInsert);
+        
+      if (error) throw error;
+      
+      setImportMessage({ type: 'success', text: `¡Se han importado ${businessesToInsert.length} negocios correctamente!` });
+    } catch (error: any) {
+      setImportMessage({ type: 'error', text: `Error al importar: ${error.message}` });
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -159,8 +216,27 @@ export default function AdminConfig() {
               {isSearching ? 'Buscando...' : 'Buscar'}
             </button>
           </div>
+          
+          {importMessage && (
+            <div className={`p-4 mb-4 rounded-lg flex items-center space-x-2 ${importMessage.type === 'success' ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+              {importMessage.type === 'success' ? <CheckCircle size={20} /> : <XCircle size={20} />}
+              <span>{importMessage.text}</span>
+            </div>
+          )}
 
-          <div className="bg-slate-900 rounded-xl p-4 h-96 overflow-auto">
+          <div className="bg-slate-900 rounded-xl p-4 h-96 overflow-auto relative group">
+            {searchResult && !searchResult.error && (
+              <div className="absolute top-4 right-4 z-10">
+                <button
+                  onClick={handleImportBusinesses}
+                  disabled={isImporting}
+                  className="flex items-center space-x-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors shadow-lg disabled:opacity-50"
+                >
+                  <Download size={16} />
+                  <span>{isImporting ? 'Importando...' : 'Importar a Supabase'}</span>
+                </button>
+              </div>
+            )}
             {searchResult ? (
               <pre className="text-green-400 font-mono text-xs">
                 {JSON.stringify(searchResult, null, 2)}
