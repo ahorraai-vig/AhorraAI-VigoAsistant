@@ -1,0 +1,6 @@
+{
+  "name": "Asistente Vigo",
+  "description": "Asistente turístico local de Vigo con panel de administración.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
