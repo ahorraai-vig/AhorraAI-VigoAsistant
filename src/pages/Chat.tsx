@@ -9,6 +9,9 @@ const translations: Record<string, any> = {
   'Español': {
     title: 'Asistente Vigo',
     subtitle: 'Tu guía local',
+    userTypeTitle: '¿Quién eres?',
+    userTypeTourist: 'Visita',
+    userTypeLocal: 'Soy de aquí',
     timeLabel: 'Tiempo disponible',
     times: {
       'Pocas horas': 'Pocas horas',
@@ -32,6 +35,9 @@ const translations: Record<string, any> = {
   'Galego': {
     title: 'Asistente Vigo',
     subtitle: 'A túa guía local',
+    userTypeTitle: 'Quen es?',
+    userTypeTourist: 'Visita',
+    userTypeLocal: 'Son de aquí',
     timeLabel: 'Tempo dispoñible',
     times: {
       'Pocas horas': 'Poucas horas',
@@ -55,6 +61,9 @@ const translations: Record<string, any> = {
   'English': {
     title: 'Vigo Assistant',
     subtitle: 'Your local guide',
+    userTypeTitle: 'Who are you?',
+    userTypeTourist: 'Tourist',
+    userTypeLocal: 'Local',
     timeLabel: 'Available time',
     times: {
       'Pocas horas': 'A few hours',
@@ -78,6 +87,9 @@ const translations: Record<string, any> = {
   'Deutsch': {
     title: 'Vigo Assistent',
     subtitle: 'Dein Reiseführer',
+    userTypeTitle: 'Wer bist du?',
+    userTypeTourist: 'Besucher',
+    userTypeLocal: 'Einheimischer',
     timeLabel: 'Verfügbare Zeit',
     times: {
       'Pocas horas': 'Ein paar Stunden',
@@ -101,6 +113,9 @@ const translations: Record<string, any> = {
   'Français': {
     title: 'Assistant Vigo',
     subtitle: 'Votre guide local',
+    userTypeTitle: 'Qui êtes-vous ?',
+    userTypeTourist: 'Visiteur',
+    userTypeLocal: 'Local',
     timeLabel: 'Temps disponible',
     times: {
       'Pocas horas': 'Quelques heures',
@@ -124,6 +139,9 @@ const translations: Record<string, any> = {
   'Português': {
     title: 'Assistente Vigo',
     subtitle: 'Seu guia local',
+    userTypeTitle: 'Quem é você?',
+    userTypeTourist: 'Visitante',
+    userTypeLocal: 'Local',
     timeLabel: 'Tempo disponível',
     times: {
       'Pocas horas': 'Poucas horas',
@@ -147,6 +165,9 @@ const translations: Record<string, any> = {
   'Italiano': {
     title: 'Assistente Vigo',
     subtitle: 'La tua guida locale',
+    userTypeTitle: 'Chi sei?',
+    userTypeTourist: 'Visitatore',
+    userTypeLocal: 'Locale',
     timeLabel: 'Tempo a disposizione',
     times: {
       'Pocas horas': 'Poche ore',
@@ -180,8 +201,9 @@ const greetings = [
 ];
 
 export default function Chat() {
-  const [step, setStep] = useState<'welcome' | 'language' | 'config' | 'chat'>('welcome');
+  const [step, setStep] = useState<'welcome' | 'language' | 'userType' | 'config' | 'chat'>('welcome');
   const [greetingIndex, setGreetingIndex] = useState(0);
+  const [langTitleIndex, setLangTitleIndex] = useState(0);
   const [config, setConfig] = useState<ChatConfig>({
     timeAvailable: '',
     interests: [],
@@ -197,6 +219,15 @@ export default function Chat() {
     if (step === 'welcome') {
       const interval = setInterval(() => {
         setGreetingIndex((prev) => (prev + 1) % greetings.length);
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [step]);
+
+  useEffect(() => {
+    if (step === 'language') {
+      const interval = setInterval(() => {
+        setLangTitleIndex((prev) => (prev + 1) % Object.keys(translations).length);
       }, 3000);
       return () => clearInterval(interval);
     }
@@ -304,7 +335,46 @@ export default function Chat() {
     }
 
     if (step === 'language') {
-      // Usamos el título del idioma actual (español por defecto hasta que seleccione uno)
+      const languages = Object.keys(translations);
+      const currentLang = languages[langTitleIndex];
+      const currentTitle = translations[currentLang].languageTitle;
+      
+      return (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center"
+        >
+          <div className="w-full max-w-sm flex-1 flex items-center justify-center">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentLang}
+                initial={{ opacity: 0, y: 15, filter: 'blur(8px)' }}
+                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, y: -15, filter: 'blur(8px)' }}
+                transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+                className="flex flex-col items-center w-full"
+              >
+                <h2 className="text-3xl font-light tracking-tight text-center mb-10 text-white/80">
+                  {currentTitle}
+                </h2>
+                
+                <button
+                  onClick={() => {
+                    setConfig({...config, language: currentLang});
+                    setStep('userType');
+                  }}
+                  className="w-full py-5 px-8 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-all text-xl font-semibold text-center shadow-lg border border-white/10 text-white"
+                >
+                  {currentLang}
+                </button>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </motion.div>
+      );
+    }
+    if (step === 'userType') {
       const t = translations[config.language] || translations['Español'];
       return (
         <motion.div
@@ -320,25 +390,35 @@ export default function Chat() {
               transition={{ delay: 0.1, duration: 0.8 }}
               className="text-2xl font-light tracking-tight text-center mb-10 text-white/80"
             >
-              {t.languageTitle}
+              {t.userTypeTitle}
             </motion.h2>
             
-            <div className="space-y-3">
-              {Object.keys(translations).map((lang, idx) => (
-                <motion.button
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 + (idx * 0.05), duration: 0.6 }}
-                  key={lang}
-                  onClick={() => {
-                    setConfig({...config, language: lang});
-                    setStep('config');
-                  }}
-                  className="w-full py-4 px-6 rounded-2xl bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-all text-lg font-medium text-center shadow-lg"
-                >
-                  {lang}
-                </motion.button>
-              ))}
+            <div className="flex flex-col md:flex-row gap-6 md:gap-8 items-center justify-center">
+              <motion.button
+                animate={{ scale: [1, 1.04, 1] }}
+                transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+                onClick={() => {
+                  setConfig({...config, userType: 'tourist'});
+                  setStep('config');
+                }}
+                className="w-44 h-44 md:w-52 md:h-52 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-colors flex flex-col items-center justify-center text-xl font-medium shadow-[0_0_20px_rgba(255,255,255,0.05)] border border-white/10"
+              >
+                <Palmtree size={32} className="mb-3 opacity-70" />
+                {t.userTypeTourist}
+              </motion.button>
+              
+              <motion.button
+                animate={{ scale: [1, 1.04, 1] }}
+                transition={{ repeat: Infinity, duration: 4, ease: "easeInOut", delay: 2 }}
+                onClick={() => {
+                  setConfig({...config, userType: 'local'});
+                  setStep('config');
+                }}
+                className="w-44 h-44 md:w-52 md:h-52 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-colors flex flex-col items-center justify-center text-xl font-medium shadow-[0_0_20px_rgba(255,255,255,0.05)] border border-white/10"
+              >
+                <MapPin size={32} className="mb-3 opacity-70" />
+                {t.userTypeLocal}
+              </motion.button>
             </div>
           </div>
         </motion.div>
@@ -362,51 +442,65 @@ export default function Chat() {
               <p className="text-white/50 mt-1">{t.subtitle}</p>
             </div>
             
-            <div className="flex-1 space-y-6 mb-8">
+            <div className="flex-1 space-y-8 mb-8 flex flex-col items-center">
               
-              <div className="bg-[#1C1C1E] rounded-[32px] p-6 shadow-xl">
-                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest pl-1 mb-4">{t.timeLabel}</label>
-                <div className="flex flex-col gap-2">
-                  {['Pocas horas', 'Medio día', 'Día completo'].map(time => (
-                    <button 
-                      key={time}
-                      onClick={() => setConfig({...config, timeAvailable: time})}
-                      className={`py-3.5 px-5 rounded-2xl text-left font-medium transition-all ${
-                        config.timeAvailable === time 
-                          ? 'bg-white text-black shadow-md' 
-                          : 'bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]'
-                      }`}
-                    >
-                      {t.times[time]}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {config.userType === 'tourist' && (
+                <motion.div 
+                  animate={{ scale: [1, 1.02, 1] }}
+                  transition={{ repeat: Infinity, duration: 5, ease: "easeInOut" }}
+                  className="bg-[#1C1C1E] rounded-[48px] p-8 shadow-xl w-full max-w-sm border border-white/5 flex flex-col items-center"
+                >
+                  <label className="block text-sm font-medium text-white/70 uppercase tracking-widest mb-6 text-center">{t.timeLabel}</label>
+                  <div className="flex flex-col gap-3 w-full items-center">
+                    {['Pocas horas', 'Medio día', 'Día completo'].map((time, idx) => (
+                      <motion.button 
+                        animate={{ scale: [1, 1.02, 1] }}
+                        transition={{ repeat: Infinity, duration: 3, ease: "easeInOut", delay: idx * 0.5 }}
+                        key={time}
+                        onClick={() => setConfig({...config, timeAvailable: time})}
+                        className={`w-[85%] py-4 rounded-full text-center font-medium transition-colors ${
+                          config.timeAvailable === time 
+                            ? 'bg-white text-black shadow-md' 
+                            : 'bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]'
+                        }`}
+                      >
+                        {t.times[time]}
+                      </motion.button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
 
-              <div className="bg-[#1C1C1E] rounded-[32px] p-6 shadow-xl">
-                <label className="block text-xs font-semibold text-white/50 uppercase tracking-widest pl-1 mb-4">{t.interestsLabel}</label>
-                <div className="flex flex-wrap gap-2">
+              <motion.div 
+                animate={{ scale: [1, 1.02, 1] }}
+                transition={{ repeat: Infinity, duration: 5, ease: "easeInOut", delay: 2.5 }}
+                className="bg-[#1C1C1E] rounded-[48px] p-8 shadow-xl w-full max-w-sm border border-white/5 flex flex-col items-center"
+              >
+                <label className="block text-sm font-medium text-white/70 uppercase tracking-widest mb-6 text-center">{t.interestsLabel}</label>
+                <div className="flex flex-wrap gap-3 justify-center">
                   {[
                     { id: 'Comida', icon: <Utensils size={16} className="mr-2 opacity-70" /> },
                     { id: 'Vistas', icon: <MapPin size={16} className="mr-2 opacity-70" /> },
                     { id: 'Compras', icon: <ShoppingBag size={16} className="mr-2 opacity-70" /> },
                     { id: 'Historia', icon: <Landmark size={16} className="mr-2 opacity-70" /> },
                     { id: 'Playa', icon: <Palmtree size={16} className="mr-2 opacity-70" /> }
-                  ].map(interest => (
-                    <button 
+                  ].map((interest, idx) => (
+                    <motion.button 
+                      animate={{ scale: [1, 1.03, 1] }}
+                      transition={{ repeat: Infinity, duration: 3.5, ease: "easeInOut", delay: idx * 0.3 }}
                       key={interest.id}
                       onClick={() => toggleInterest(interest.id)}
-                      className={`flex items-center px-4 py-2.5 rounded-full font-medium transition-all ${
+                      className={`flex items-center px-5 py-3 rounded-full font-medium transition-colors ${
                         config.interests.includes(interest.id) 
                           ? 'bg-white text-black shadow-md' 
                           : 'bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]'
                       }`}
                     >
                       {interest.icon} {t.interests[interest.id]}
-                    </button>
+                    </motion.button>
                   ))}
                 </div>
-              </div>
+              </motion.div>
 
             </div>
 
@@ -428,7 +522,6 @@ export default function Chat() {
         </motion.div>
       );
     }
-
     return (
       <motion.div 
         initial={{ opacity: 0 }}

@@ -47,7 +47,7 @@ export default function AdminDashboard() {
           { label: 'Total Conversaciones', value: loading ? '...' : stats.conversations, icon: <MessageSquare size={20} className="text-blue-600" /> },
           { label: 'Usuarios y Admins', value: loading ? '...' : stats.users, icon: <Users size={20} className="text-emerald-600" /> },
           { label: 'Negocios Activos', value: loading ? '...' : stats.businesses, icon: <Store size={20} className="text-amber-600" /> },
-          { label: 'Satisfacción', value: '4.8/5', icon: <TrendingUp size={20} className="text-purple-600" /> }
+          { label: 'Métricas Extra', value: 'Pendiente', icon: <TrendingUp size={20} className="text-purple-600" /> }
         ].map((stat, i) => (
           <div key={i} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">

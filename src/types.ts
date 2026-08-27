@@ -1,4 +1,5 @@
 export interface ChatConfig {
+  userType?: string;
   timeAvailable: string;
   interests: string[];
   language: string;

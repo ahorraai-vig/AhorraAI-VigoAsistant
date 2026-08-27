@@ -66,26 +66,73 @@ export default function AdminConfig() {
         throw new Error("No estás autenticado o la sesión expiró.");
       }
 
-      const businessesToInsert = results.map((place: any) => ({
-        name: place.title || 'Negocio Desconocido',
-        description: place.type || place.description || '',
-        address: place.address || '',
-        phone: place.phone || '',
-        website: place.links?.website || place.website || '',
-        latitude: place.gps_coordinates?.latitude || null,
-        longitude: place.gps_coordinates?.longitude || null,
-        opening_hours: place.operating_hours || {},
-        is_active: true,
-        owner_id: user.id
-      }));
-
-      const { error } = await supabase
+      // Fetch existing businesses to deduplicate
+      const { data: existingBusinesses, error: fetchError } = await supabase
         .from('businesses')
-        .insert(businessesToInsert);
+        .select('name, address, phone, website');
         
-      if (error) throw error;
+      if (fetchError) {
+        console.error("Error fetching existing businesses:", fetchError);
+      }
       
-      setImportMessage({ type: 'success', text: `¡Se han importado ${businessesToInsert.length} negocios correctamente!` });
+      const existing = existingBusinesses || [];
+      const normalize = (str: string) => (str || '').toLowerCase().trim();
+      
+      let dupCount = 0;
+      const businessesToInsert = [];
+
+      for (const place of results) {
+        const placeName = place.title || 'Negocio Desconocido';
+        const placeAddress = place.address || '';
+        const placePhone = place.phone || '';
+        const placeWebsite = place.links?.website || place.website || '';
+        
+        // Deduplication rules
+        const isDuplicate = existing.some(b => {
+          // 1. Same website (if both have one)
+          if (b.website && placeWebsite && normalize(b.website) === normalize(placeWebsite)) return true;
+          // 2. Same phone (if both have one)
+          if (b.phone && placePhone && normalize(b.phone) === normalize(placePhone)) return true;
+          // 3. Same name AND same address
+          if (normalize(b.name) === normalize(placeName) && normalize(b.address) === normalize(placeAddress)) return true;
+          return false;
+        });
+        
+        if (isDuplicate) {
+          dupCount++;
+          continue;
+        }
+
+        // Add to our batch
+        businessesToInsert.push({
+          name: placeName,
+          description: place.type || place.description || '',
+          address: placeAddress,
+          phone: placePhone,
+          website: placeWebsite,
+          latitude: place.gps_coordinates?.latitude || null,
+          longitude: place.gps_coordinates?.longitude || null,
+          opening_hours: place.operating_hours || {},
+          is_active: true,
+          owner_id: user.id
+        });
+        
+        // Update our 'existing' array to catch duplicates within the same import batch
+        existing.push({ name: placeName, address: placeAddress, phone: placePhone, website: placeWebsite });
+      }
+
+      if (businessesToInsert.length > 0) {
+        const { error } = await supabase
+          .from('businesses')
+          .insert(businessesToInsert);
+          
+        if (error) throw error;
+      }
+      
+      setImportMessage({ 
+        type: 'success', 
+        text: `Importación completada: ${businessesToInsert.length} nuevos insertados, ${dupCount} duplicados omitidos.` 
+      });
     } catch (error: any) {
       setImportMessage({ type: 'error', text: `Error al importar: ${error.message}` });
     } finally {
