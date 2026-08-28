@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { Send, MapPin, Clock, Utensils, ShoppingBag, Palmtree, Landmark, Settings, Shield, ChevronRight } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Send, MapPin, Utensils, ShoppingBag, Palmtree, Landmark, Settings, Shield, Store, MessageSquare, ExternalLink, Handshake, Key, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChatConfig, ChatMessage } from '../types';
 import { supabase } from '../lib/supabase';
+import { FloatingIconsBackground } from '../components/FloatingIconsBackground';
 
 const translations: Record<string, any> = {
   'Español': {
@@ -12,6 +13,12 @@ const translations: Record<string, any> = {
     userTypeTitle: '¿Quién eres?',
     userTypeTourist: 'Visita',
     userTypeLocal: 'Soy de aquí',
+    userTypeBusiness: 'Soy un negocio',
+    businessModalTitle: 'Comercio Local de Vigo',
+    businessModalDesc: 'Únete al ecosistema colaborativo de Vigo, optimiza tus horas valle y cruza datos con otros comercios para generar sinergias.',
+    businessGraphBtn: 'Grafo de Comercio Colaborativo',
+    businessOnboardingBtn: 'Registrar Ficha & Oportunidades',
+    businessChatBtn: 'Continuar como negocio',
     timeLabel: 'Tiempo disponible',
     times: {
       'Pocas horas': 'Pocas horas',
@@ -38,6 +45,12 @@ const translations: Record<string, any> = {
     userTypeTitle: 'Quen es?',
     userTypeTourist: 'Visita',
     userTypeLocal: 'Son de aquí',
+    userTypeBusiness: 'Son un negocio',
+    businessModalTitle: 'Comercio Local de Vigo',
+    businessModalDesc: 'Únete á rede colaborativa de Vigo, optimiza as túas horas val e cruza datos con outros comercios para crear sinerxías.',
+    businessGraphBtn: 'Grafo de Comercio Colaborativo',
+    businessOnboardingBtn: 'Rexistrar Ficha & Oportunidades',
+    businessChatBtn: 'Continuar como negocio',
     timeLabel: 'Tempo dispoñible',
     times: {
       'Pocas horas': 'Poucas horas',
@@ -64,6 +77,12 @@ const translations: Record<string, any> = {
     userTypeTitle: 'Who are you?',
     userTypeTourist: 'Tourist',
     userTypeLocal: 'Local',
+    userTypeBusiness: 'I am a business',
+    businessModalTitle: 'Local Vigo Business',
+    businessModalDesc: 'Join the Vigo collaborative network, optimize your off-peak hours and discover business synergies with AI.',
+    businessGraphBtn: 'Collaborative Commerce Graph',
+    businessOnboardingBtn: 'Register Business Profile & Synergies',
+    businessChatBtn: 'Continue as business',
     timeLabel: 'Available time',
     times: {
       'Pocas horas': 'A few hours',
@@ -90,6 +109,11 @@ const translations: Record<string, any> = {
     userTypeTitle: 'Wer bist du?',
     userTypeTourist: 'Besucher',
     userTypeLocal: 'Einheimischer',
+    userTypeBusiness: 'Ich bin ein Geschäft',
+    businessModalTitle: 'Lokales Unternehmen in Vigo',
+    businessModalDesc: 'Verwalte dein Unternehmen im genossenschaftlichen Netzwerk.',
+    businessLoginBtn: 'Zum Unternehmensbereich',
+    businessChatBtn: 'Als Geschäft fortfahren',
     timeLabel: 'Verfügbare Zeit',
     times: {
       'Pocas horas': 'Ein paar Stunden',
@@ -116,6 +140,11 @@ const translations: Record<string, any> = {
     userTypeTitle: 'Qui êtes-vous ?',
     userTypeTourist: 'Visiteur',
     userTypeLocal: 'Local',
+    userTypeBusiness: 'Je suis un commerce',
+    businessModalTitle: 'Commerce Local de Vigo',
+    businessModalDesc: 'Gérez la présence de votre établissement dans le réseau coopératif.',
+    businessLoginBtn: 'Accéder à l\'espace Pro',
+    businessChatBtn: 'Continuer en tant que commerce',
     timeLabel: 'Temps disponible',
     times: {
       'Pocas horas': 'Quelques heures',
@@ -142,6 +171,11 @@ const translations: Record<string, any> = {
     userTypeTitle: 'Quem é você?',
     userTypeTourist: 'Visitante',
     userTypeLocal: 'Local',
+    userTypeBusiness: 'Sou um negócio',
+    businessModalTitle: 'Comércio Local de Vigo',
+    businessModalDesc: 'Gerencie a presença do seu negócio na rede cooperativa local.',
+    businessLoginBtn: 'Acessar Painel de Negócios',
+    businessChatBtn: 'Continuar como negócio',
     timeLabel: 'Tempo disponível',
     times: {
       'Pocas horas': 'Poucas horas',
@@ -168,13 +202,18 @@ const translations: Record<string, any> = {
     userTypeTitle: 'Chi sei?',
     userTypeTourist: 'Visitatore',
     userTypeLocal: 'Locale',
+    userTypeBusiness: 'Sono un\'attività',
+    businessModalTitle: 'Attività Locale di Vigo',
+    businessModalDesc: 'Gestisci la tua presenza nella rete cooperativa o consulta sinergie.',
+    businessLoginBtn: 'Area Commercianti',
+    businessChatBtn: 'Continua come attività',
     timeLabel: 'Tempo a disposizione',
     times: {
       'Pocas horas': 'Poche ore',
       'Medio día': 'Mezza giornata',
       'Día completo': 'Giornata intera'
     },
-    interestsLabel: 'I tuoi interessi',
+    interestsLabel: 'I tuoi intereses',
     interests: {
       'Comida': 'Cibo',
       'Vistas': 'Panorami',
@@ -204,6 +243,13 @@ export default function Chat() {
   const [step, setStep] = useState<'welcome' | 'language' | 'userType' | 'config' | 'chat'>('welcome');
   const [greetingIndex, setGreetingIndex] = useState(0);
   const [langTitleIndex, setLangTitleIndex] = useState(0);
+  const [showBusinessModal, setShowBusinessModal] = useState(false);
+  const [telegramInfo, setTelegramInfo] = useState<{ configured: boolean; username: string | null; url: string | null }>({
+    configured: false,
+    username: null,
+    url: null
+  });
+
   const [config, setConfig] = useState<ChatConfig>({
     timeAvailable: '',
     interests: [],
@@ -214,6 +260,17 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch('/api/telegram/info')
+      .then(res => res.json())
+      .then(data => {
+        if (data && (data.configured || data.url)) {
+          setTelegramInfo(data);
+        }
+      })
+      .catch(err => console.error("Error fetching telegram info:", err));
+  }, []);
 
   useEffect(() => {
     if (step === 'welcome') {
@@ -232,6 +289,16 @@ export default function Chat() {
       return () => clearInterval(interval);
     }
   }, [step]);
+
+  const handlePrevLang = () => {
+    const languages = Object.keys(translations);
+    setLangTitleIndex((prev) => (prev - 1 + languages.length) % languages.length);
+  };
+
+  const handleNextLang = () => {
+    const languages = Object.keys(translations);
+    setLangTitleIndex((prev) => (prev + 1) % languages.length);
+  };
 
   const toggleInterest = (interest: string) => {
     setConfig(prev => ({
@@ -286,9 +353,13 @@ export default function Chat() {
       if (data.error) throw new Error(data.error);
 
       setMessages(prev => [...prev, { id: Date.now().toString(), text: data.text, isBot: true }]);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setMessages(prev => [...prev, { id: Date.now().toString(), text: "Lo siento, ha ocurrido un error al conectar con el servidor.", isBot: true }]);
+      setMessages(prev => [...prev, { 
+        id: Date.now().toString(), 
+        text: "Lo siento, ha ocurrido un error al conectar con el asistente. Inténtalo de nuevo en unos segundos.", 
+        isBot: true 
+      }]);
     } finally {
       setLoading(false);
     }
@@ -298,6 +369,11 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const handleOpenTelegram = () => {
+    const tgUrl = telegramInfo.url || (telegramInfo.username ? `https://t.me/${telegramInfo.username}` : 'https://t.me');
+    window.open(tgUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const renderContent = () => {
     if (step === 'welcome') {
       return (
@@ -305,7 +381,8 @@ export default function Chat() {
           className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 relative cursor-pointer selection:bg-transparent"
           onClick={() => setStep('language')}
         >
-          <div className="flex-1 flex items-center justify-center w-full">
+          <FloatingIconsBackground />
+          <div className="flex-1 flex items-center justify-center w-full relative z-10">
             <AnimatePresence mode="wait">
               <motion.h1
                 key={greetingIndex}
@@ -313,7 +390,7 @@ export default function Chat() {
                 animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
                 exit={{ opacity: 0, filter: 'blur(10px)', y: -10 }}
                 transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
-                className="text-4xl md:text-6xl font-light tracking-tight text-center"
+                className="text-5xl md:text-7xl font-light tracking-tight text-center" style={{ fontFamily: "\'Playfair Display\', serif", fontStyle: "italic" }}
               >
                 {greetings[greetingIndex].text}
               </motion.h1>
@@ -324,7 +401,7 @@ export default function Chat() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 1, duration: 1 }}
-            className="pb-12"
+            className="pb-12 flex flex-col items-center gap-3"
           >
             <p className="text-sm font-medium tracking-widest uppercase text-white/50 animate-pulse">
               Toca para continuar
@@ -343,37 +420,66 @@ export default function Chat() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center"
+          className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center relative select-none"
         >
-          <div className="w-full max-w-sm flex-1 flex items-center justify-center">
+          <div className="w-full max-w-md flex-1 flex flex-col items-center justify-center relative z-10">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentLang}
-                initial={{ opacity: 0, y: 15, filter: 'blur(8px)' }}
+                initial={{ opacity: 0, y: 12, filter: 'blur(6px)' }}
                 animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, y: -15, filter: 'blur(8px)' }}
-                transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+                exit={{ opacity: 0, y: -12, filter: 'blur(6px)' }}
+                transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
                 className="flex flex-col items-center w-full"
               >
-                <h2 className="text-3xl font-light tracking-tight text-center mb-10 text-white/80">
+                <h2 className="text-2xl md:text-3xl font-light tracking-tight text-center mb-8 text-white/80">
                   {currentTitle}
                 </h2>
                 
-                <button
-                  onClick={() => {
-                    setConfig({...config, language: currentLang});
-                    setStep('userType');
-                  }}
-                  className="w-full py-5 px-8 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-all text-xl font-semibold text-center shadow-lg border border-white/10 text-white"
-                >
-                  {currentLang}
-                </button>
+                {/* Selector de idioma con flechas laterales de navegación */}
+                <div className="flex items-center justify-center gap-2.5 sm:gap-3.5 w-full">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePrevLang();
+                    }}
+                    aria-label="Idioma anterior"
+                    className="w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-90 border border-white/10 text-white/70 hover:text-white transition-all shadow-md cursor-pointer"
+                  >
+                    <ChevronLeft size={24} className="stroke-[2.2]" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfig({...config, language: currentLang});
+                      setStep('userType');
+                    }}
+                    className="flex-1 py-4 sm:py-5 px-6 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-all text-xl font-semibold text-center shadow-lg border border-white/10 text-white tracking-wide cursor-pointer hover:border-white/20"
+                  >
+                    {currentLang}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNextLang();
+                    }}
+                    aria-label="Idioma siguiente"
+                    className="w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-90 border border-white/10 text-white/70 hover:text-white transition-all shadow-md cursor-pointer"
+                  >
+                    <ChevronRight size={24} className="stroke-[2.2]" />
+                  </button>
+                </div>
               </motion.div>
             </AnimatePresence>
           </div>
         </motion.div>
       );
     }
+
     if (step === 'userType') {
       const t = translations[config.language] || translations['Español'];
       return (
@@ -381,19 +487,20 @@ export default function Chat() {
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center"
+          className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center relative"
         >
-          <div className="w-full max-w-sm flex-1 flex flex-col justify-center">
+          <div className="w-full max-w-md flex-1 flex flex-col justify-center items-center relative z-10">
             <motion.h2 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1, duration: 0.8 }}
-              className="text-2xl font-light tracking-tight text-center mb-10 text-white/80"
+              className="text-2xl font-light tracking-tight text-center mb-8 text-white/80"
             >
               {t.userTypeTitle}
             </motion.h2>
             
-            <div className="flex flex-col md:flex-row gap-6 md:gap-8 items-center justify-center">
+            {/* 3 Burbujas orgánicas: Turista, Local, Soy un negocio */}
+            <div className="flex flex-wrap gap-4 md:gap-6 items-center justify-center max-w-sm">
               <motion.button
                 animate={{ scale: [1, 1.04, 1] }}
                 transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
@@ -401,26 +508,94 @@ export default function Chat() {
                   setConfig({...config, userType: 'tourist'});
                   setStep('config');
                 }}
-                className="w-44 h-44 md:w-52 md:h-52 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-colors flex flex-col items-center justify-center text-xl font-medium shadow-[0_0_20px_rgba(255,255,255,0.05)] border border-white/10"
+                className="w-36 h-36 md:w-40 md:h-40 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-colors flex flex-col items-center justify-center text-lg font-medium shadow-[0_0_20px_rgba(255,255,255,0.05)] border border-white/10"
               >
-                <Palmtree size={32} className="mb-3 opacity-70" />
-                {t.userTypeTourist}
+                <Palmtree size={28} className="mb-2 text-emerald-400 opacity-90" />
+                <span>{t.userTypeTourist}</span>
               </motion.button>
               
               <motion.button
                 animate={{ scale: [1, 1.04, 1] }}
-                transition={{ repeat: Infinity, duration: 4, ease: "easeInOut", delay: 2 }}
+                transition={{ repeat: Infinity, duration: 4, ease: "easeInOut", delay: 1.5 }}
                 onClick={() => {
                   setConfig({...config, userType: 'local'});
                   setStep('config');
                 }}
-                className="w-44 h-44 md:w-52 md:h-52 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-colors flex flex-col items-center justify-center text-xl font-medium shadow-[0_0_20px_rgba(255,255,255,0.05)] border border-white/10"
+                className="w-36 h-36 md:w-40 md:h-40 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-colors flex flex-col items-center justify-center text-lg font-medium shadow-[0_0_20px_rgba(255,255,255,0.05)] border border-white/10"
               >
-                <MapPin size={32} className="mb-3 opacity-70" />
-                {t.userTypeLocal}
+                <MapPin size={28} className="mb-2 text-blue-400 opacity-90" />
+                <span>{t.userTypeLocal}</span>
+              </motion.button>
+
+              <motion.button
+                animate={{ scale: [1, 1.05, 1] }}
+                transition={{ repeat: Infinity, duration: 4.5, ease: "easeInOut", delay: 3 }}
+                onClick={() => {
+                  setShowBusinessModal(true);
+                }}
+                className="w-36 h-36 md:w-40 md:h-40 rounded-full bg-gradient-to-b from-[#242428] to-[#1C1C1E] hover:from-[#323238] hover:to-[#242428] active:scale-[0.98] transition-all flex flex-col items-center justify-center text-center p-2 text-base font-medium shadow-[0_0_25px_rgba(234,179,8,0.1)] border border-amber-500/30"
+              >
+                <Store size={28} className="mb-2 text-amber-400 opacity-90" />
+                <span className="leading-tight px-1">{t.userTypeBusiness}</span>
               </motion.button>
             </div>
           </div>
+
+          {/* Modal / Dialog para Comercios */}
+          <AnimatePresence>
+            {showBusinessModal && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                onClick={() => setShowBusinessModal(false)}
+              >
+                <motion.div 
+                  initial={{ scale: 0.95, y: 20 }}
+                  animate={{ scale: 1, y: 0 }}
+                  exit={{ scale: 0.95, y: 20 }}
+                  className="bg-[#1C1C1E] border border-white/15 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl text-center"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="w-16 h-16 bg-amber-500/10 text-amber-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
+                    <Store size={32} />
+                  </div>
+                  <h3 className="text-2xl font-semibold text-white mb-2">{t.businessModalTitle}</h3>
+                  <p className="text-white/60 text-sm leading-relaxed mb-6">{t.businessModalDesc}</p>
+                  
+                  <div className="flex flex-col gap-3">
+                    <Link
+                      to="/cooperacion"
+                      className="w-full py-3.5 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg text-sm"
+                    >
+                      <Handshake size={18} className="text-amber-300" />
+                      <span>{t.businessGraphBtn || 'Grafo de Comercio Colaborativo'}</span>
+                    </Link>
+
+                    <Link
+                      to="/alta-negocio"
+                      className="w-full py-3.5 px-6 bg-white hover:bg-gray-100 text-black font-semibold rounded-2xl transition-all flex items-center justify-center gap-2 shadow-md text-sm"
+                    >
+                      <Plus size={18} className="text-emerald-600" />
+                      <span>{t.businessOnboardingBtn || 'Registrar Ficha de Negocio & Sinergias'}</span>
+                    </Link>
+
+                    <button
+                      onClick={() => {
+                        setShowBusinessModal(false);
+                        setConfig({...config, userType: 'business'});
+                        setStep('config');
+                      }}
+                      className="w-full py-2.5 px-4 text-xs text-white/50 hover:text-white transition-colors text-center"
+                    >
+                      {t.businessChatDirectBtn || 'O continuar al chat como negocio'}
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       );
     }
@@ -435,7 +610,7 @@ export default function Chat() {
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
           className="min-h-screen bg-black flex flex-col p-4 md:p-8 font-sans text-white"
         >
-          <div className="max-w-md w-full mx-auto flex-1 flex flex-col">
+          <div className="max-w-md w-full mx-auto flex-1 flex flex-col relative z-10">
             
             <div className="text-center mt-8 mb-10">
               <h1 className="text-3xl font-semibold tracking-tight text-white">{t.title}</h1>
@@ -528,19 +703,49 @@ export default function Chat() {
         animate={{ opacity: 1 }}
         className="flex flex-col h-[100dvh] bg-black font-sans text-white"
       >
-      <header className="flex items-center justify-between p-4 bg-[#1C1C1E]/80 backdrop-blur-md border-b border-white/10 shadow-sm sticky top-0 z-10">
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-black font-bold">
+      <header className="flex items-center justify-between p-3.5 md:p-4 bg-[#1C1C1E]/90 backdrop-blur-md border-b border-white/10 shadow-sm sticky top-0 z-30">
+        <div className="flex items-center space-x-2.5">
+          <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-black font-bold shadow-sm">
             V
           </div>
-          <h1 className="text-lg font-semibold tracking-tight text-white">Asistente Vigo</h1>
+          <div>
+            <h1 className="text-base md:text-lg font-semibold tracking-tight text-white leading-tight">Asistente Vigo</h1>
+            <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> En línea
+            </span>
+          </div>
         </div>
-        <button 
-          onClick={() => setStep('config')} 
-          className="p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-colors"
-        >
-          <Settings size={20} />
-        </button>
+
+        {/* Barra de Acciones Superior Derecha */}
+        <div className="flex items-center gap-1.5 md:gap-2">
+          {/* Botón de Acceso a Telegram */}
+          <button
+            onClick={handleOpenTelegram}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 rounded-full transition-all active:scale-95 shadow-sm"
+            title="Abrir bot en Telegram"
+          >
+            <Send size={13} className="-rotate-12" />
+            <span className="hidden sm:inline">Telegram</span>
+          </button>
+
+          {/* Botón Ajustes */}
+          <button 
+            onClick={() => setStep('config')} 
+            className="p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+            title="Ajustes y Preferencias"
+          >
+            <Settings size={18} />
+          </button>
+
+          {/* Botón Admin Panel en la esquina superior derecha */}
+          <Link 
+            to="/admin" 
+            className="p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+            title="Panel de Administración"
+          >
+            <Shield size={18} />
+          </Link>
+        </div>
       </header>
 
       <main className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -582,7 +787,7 @@ export default function Chat() {
           <button 
             type="submit" 
             disabled={!input.trim() || loading}
-            className="absolute right-2 top-2 bottom-2 aspect-square flex items-center justify-center bg-white text-black rounded-full hover:bg-gray-200 disabled:opacity-50 disabled:hover:bg-white transition-all shadow-md active:scale-95"
+            className="absolute right-2 top-2 bottom-2 aspect-square flex items-center justify-center bg-white text-black rounded-full hover:bg-gray-200 disabled:opacity-50 disabled:hover:bg-white transition-all shadow-md active:scale-95 cursor-pointer"
           >
             <Send size={18} className="ml-0.5" />
           </button>
@@ -594,14 +799,28 @@ export default function Chat() {
 
   return (
     <>
+      {/* Botones de Cabecera Flotantes para pantallas previas al chat */}
+      {step !== 'chat' && (
+        <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
+          <button
+            onClick={handleOpenTelegram}
+            className="p-2.5 text-sky-400 bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] border border-sky-500/30 rounded-full shadow-lg backdrop-blur-xl transition-all active:scale-95"
+            title="Abrir bot en Telegram"
+          >
+            <Send size={18} className="-rotate-12" />
+          </button>
+          <Link 
+            to="/admin" 
+            className="p-2.5 text-white/50 hover:text-white bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] rounded-full shadow-lg backdrop-blur-xl transition-all border border-white/10"
+            title="Panel de Administración"
+          >
+            <Shield size={18} />
+          </Link>
+        </div>
+      )}
+
       {renderContent()}
-      <Link 
-        to="/admin" 
-        className="fixed bottom-6 right-6 p-3 text-white/30 hover:text-white bg-white/10 hover:bg-white/20 rounded-full shadow-lg backdrop-blur-xl transition-all z-50 border border-white/10"
-        title="Admin Panel"
-      >
-        <Shield size={20} />
-      </Link>
     </>
   );
 }
+
