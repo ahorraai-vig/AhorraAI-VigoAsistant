@@ -1,3 +1,5 @@
+import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService } from './services/vigo';
+
 import express from "express";
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
@@ -73,7 +75,7 @@ async function callGroqChat(messages: Array<{ role: string; content: string }>, 
       "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "openai/gpt-oss-20b",
+      model: "llama3-70b-8192",
       messages: groqMessages,
       temperature: 0.7,
       max_tokens: 1024
@@ -89,6 +91,108 @@ async function callGroqChat(messages: Array<{ role: string; content: string }>, 
   return data.choices?.[0]?.message?.content || "Sin respuesta";
 }
 
+
+const vigoTools = [{
+  functionDeclarations: [
+    {
+      name: "get_vigo_events",
+      description: "Obtiene la agenda cultural y eventos en Vigo",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          date: { type: "STRING", description: "Fecha opcional" },
+          query: { type: "STRING", description: "Búsqueda opcional" }
+        }
+      }
+    },
+    {
+      name: "get_vigo_parking",
+      description: "Obtiene el estado de ocupación de los parkings en tiempo real en Vigo",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          near: { type: "STRING", description: "Zona opcional" }
+        }
+      }
+    },
+    {
+      name: "get_vigo_traffic",
+      description: "Obtiene el estado del tráfico y congestión en tiempo real en Vigo",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          area: { type: "STRING", description: "Área opcional" }
+        }
+      }
+    },
+    {
+      name: "get_vigo_traffic_alerts",
+      description: "Obtiene los avisos de tráfico en Vigo",
+      parameters: {
+        type: "OBJECT",
+        properties: {}
+      }
+    },
+    {
+      name: "get_vigo_bus_stops",
+      description: "Obtiene las paradas de autobús (Vitrasa) en Vigo",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          near: { type: "STRING", description: "Zona opcional" }
+        }
+      }
+    },
+    {
+      name: "get_vigo_bus_routes",
+      description: "Obtiene las rutas de autobús (GTFS) en Vigo",
+      parameters: {
+        type: "OBJECT",
+        properties: {}
+      }
+    },
+    {
+      name: "get_vigo_alerts",
+      description: "Obtiene avisos generales del Concello de Vigo",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          type: { type: "STRING", description: "Tipo de aviso" }
+        }
+      }
+    },
+    {
+      name: "get_vigo_poi",
+      description: "Obtiene puntos de interés en Vigo (restaurantes, playas, museos...)",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          category: { type: "STRING", description: "Categoría de POI" },
+          near: { type: "STRING", description: "Zona" }
+        }
+      }
+    },
+    {
+      name: "get_vigo_weather",
+      description: "Obtiene el clima en Vigo",
+      parameters: {
+        type: "OBJECT",
+        properties: {}
+      }
+    },
+    {
+      name: "get_vigo_next_bus_arrivals",
+      description: "Obtiene las próximas llegadas de autobús en una parada de Vigo",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          stop_id: { type: "STRING" }
+        }
+      }
+    }
+  ]
+}];
+
 async function generateAIResponse(formattedMessages: Array<{ role: string; content: string }>, systemInstruction: string): Promise<string> {
   // 1. Intentar primero con Gemini
   if (ai) {
@@ -101,6 +205,7 @@ async function generateAIResponse(formattedMessages: Array<{ role: string; conte
         })),
         config: {
           systemInstruction,
+          tools: vigoTools,
         }
       });
       if (response.text) {
@@ -895,6 +1000,51 @@ app.post("/api/chat", async (req, res) => {
 
     const lastMessage = messages[messages.length - 1].text;
     
+    // --- VIGO INTELLIGENCE LAYER ---
+    const lowerMessage = lastMessage.toLowerCase();
+    let vigoContextText = "Sin datos de contexto adicionales del Concello de Vigo.";
+    const isEvents = lowerMessage.match(/hoy|evento|concierto|hacer|agenda|cultura/);
+    const isParking = lowerMessage.match(/aparc|parking|coche/);
+    const isTraffic = lowerMessage.match(/tráfico|trafico|atasco|coche/);
+    const isBus = lowerMessage.match(/bus|vitrasa|parada|transporte/);
+    
+    const vigoContextParts = [];
+    
+    if (isParking) {
+       const pData = await mobilityService.getParkingStatus();
+       if (pData.healthy && pData.data) {
+          vigoContextParts.push(`[PARKING EN TIEMPO REAL - Actualizado: ${pData.retrieved_at} | Fuente: ${pData.source}]:\n` + JSON.stringify(Array.isArray(pData.data) ? pData.data.slice(0, 10) : pData.data).substring(0, 500));
+       } else {
+          vigoContextParts.push(`[PARKING EN TIEMPO REAL]: No tengo datos actualizados de parking en este momento.`);
+       }
+    }
+    
+    if (isTraffic) {
+       const tData = await mobilityService.getTrafficStatus();
+       if (tData.healthy && tData.data) {
+          vigoContextParts.push(`[TRÁFICO EN TIEMPO REAL - Actualizado: ${tData.retrieved_at} | Fuente: ${tData.source}]:\n` + JSON.stringify(Array.isArray(tData.data) ? tData.data.slice(0, 5) : tData.data).substring(0, 500));
+       }
+       const alertsData = await mobilityService.getTrafficAlerts();
+       if (alertsData.healthy && alertsData.data) {
+          vigoContextParts.push(`[AVISOS DE TRÁFICO - Actualizado: ${alertsData.retrieved_at} | Fuente: ${alertsData.source}]:\n` + JSON.stringify(Array.isArray(alertsData.data) ? alertsData.data.slice(0, 5) : alertsData.data).substring(0, 500));
+       }
+    }
+    
+    if (isEvents) {
+       const eData = await eventsService.getEvents();
+       if (eData.healthy && eData.data) {
+          vigoContextParts.push(`[AGENDA CULTURAL - Actualizado: ${eData.retrieved_at} | Fuente: ${eData.source}]:\n` + JSON.stringify(Array.isArray(eData.data) ? eData.data.slice(0, 5) : eData.data).substring(0, 500));
+       } else {
+          vigoContextParts.push(`[AGENDA CULTURAL]: No tengo datos actualizados de la agenda en este momento.`);
+       }
+    }
+    
+    if (vigoContextParts.length > 0) {
+        vigoContextText = vigoContextParts.join('\n\n');
+    }
+    // -------------------------------
+
+    
     let localDatabaseResultsText = "No relevant local database results.";
     let externalSerpapiResultsText = "No external results fetched.";
     
@@ -959,6 +1109,17 @@ ${externalSerpapiResultsText}
 
 OFERTAS CRUZADAS Y PACKS ACTIVOS EN VIGO (Sinergias):
 ${synergiesText}
+
+VIGO_CONTEXT (Datos oficiales del Concello de Vigo – Prioridad #1.5):
+${vigoContextText}
+
+REGLAS ADICIONALES PARA VIGO_CONTEXT:
+- Usa estos datos cuando aporten valor real (eventos, parking libre, tráfico, avisos, transporte).
+- Cruza siempre con LOCAL_DATABASE_RESULTS y sinergias cuando sea posible.
+- Ejemplo de respuesta potente: "Hoy hay concierto en X a las 21:00. Parking Urzáiz tiene 42 plazas libres (actualizado hace 2 min). Tráfico moderado. Te recomiendo [negocio de la red] a 5 min andando + pack con Y."
+- Nunca inventes datos que no vengan en VIGO_CONTEXT.
+- Indica siempre la fuente y la hora de actualización cuando uses datos dinámicos.
+- Si un feed está unhealthy, dilo ("No tengo datos actualizados de parking en este momento").
 
 SOURCE_POLICY (REGLAS ESTRICTAS):
 1. La base de datos local (LOCAL_DATABASE_RESULTS) tiene PRIORIDAD ABSOLUTA. Si hay negocios aquí, recomiéndalos primero.

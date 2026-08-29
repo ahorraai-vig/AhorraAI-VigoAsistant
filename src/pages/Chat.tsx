@@ -4,7 +4,6 @@ import { Send, MapPin, Utensils, ShoppingBag, Palmtree, Landmark, Settings, Shie
 import { motion, AnimatePresence } from 'motion/react';
 import { ChatConfig, ChatMessage } from '../types';
 import { supabase } from '../lib/supabase';
-import { FloatingIconsBackground } from '../components/FloatingIconsBackground';
 
 const translations: Record<string, any> = {
   'Español': {
@@ -381,8 +380,8 @@ export default function Chat() {
           className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 relative cursor-pointer selection:bg-transparent"
           onClick={() => setStep('language')}
         >
-          <FloatingIconsBackground />
-          <div className="flex-1 flex items-center justify-center w-full relative z-10">
+          
+          <div className="flex-1 flex items-center justify-center w-full ">
             <AnimatePresence mode="wait">
               <motion.h1
                 key={greetingIndex}
@@ -422,7 +421,7 @@ export default function Chat() {
           animate={{ opacity: 1 }}
           className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center relative select-none"
         >
-          <div className="w-full max-w-md flex-1 flex flex-col items-center justify-center relative z-10">
+          <div className="w-full max-w-md flex-1 flex flex-col items-center justify-center ">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentLang}
@@ -489,7 +488,7 @@ export default function Chat() {
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
           className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center relative"
         >
-          <div className="w-full max-w-md flex-1 flex flex-col justify-center items-center relative z-10">
+          <div className="w-full max-w-md flex-1 flex flex-col justify-center items-center ">
             <motion.h2 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -610,7 +609,7 @@ export default function Chat() {
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
           className="min-h-screen bg-black flex flex-col p-4 md:p-8 font-sans text-white"
         >
-          <div className="max-w-md w-full mx-auto flex-1 flex flex-col relative z-10">
+          <div className="max-w-md w-full mx-auto flex-1 flex flex-col ">
             
             <div className="text-center mt-8 mb-10">
               <h1 className="text-3xl font-semibold tracking-tight text-white">{t.title}</h1>
