@@ -1,14 +1,31 @@
-import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService } from './services/vigo';
+import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService, weatherProvider } from './services/vigo';
+import { 
+  vigoAgentPlanner, 
+  vigoDataRegistry, 
+  ahorraAIBusinessService, 
+  vigoToolExecutor,
+  vigoContextService,
+  vigoHistoricalDataService,
+  vigoTimeResolver
+} from './services/brain';
 
 import express from "express";
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(express.json({ limit: '2mb' }));
 
 // Init Gemini (Server Side Only)
-const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ 
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build'
+    }
+  }
+}) : null;
 
 // Init Supabase (Server Side)
 const supabaseUrl = process.env.VITE_SUPABASE_URL?.replace(/\/rest\/v1\/?$/, '')?.replace(/\/$/, '');
@@ -52,7 +69,72 @@ app.get("/api/telegram/info", async (req, res) => {
   }
 });
 
-// --- Servicios de IA (Gemini con Fallback a Groq) ---
+// --- Servicios de IA (Gemini con Fallback Multi-Modelo y Groq Dinámico) ---
+
+let cachedGroqModels: string[] = [];
+let groqModelsCacheTime = 0;
+
+async function getAvailableGroqModels(apiKey: string): Promise<string[]> {
+  const now = Date.now();
+  if (cachedGroqModels.length > 0 && (now - groqModelsCacheTime < 300000)) { // 5 min TTL
+    return cachedGroqModels;
+  }
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: {
+        "Authorization": `Bearer ${apiKey}`
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data?.data) && data.data.length > 0) {
+        // Filtrar modelos de texto/chat descartando whisper, tts, embeddings, etc.
+        const chatModels = data.data
+          .map((m: any) => m.id as string)
+          .filter((id: string) => 
+            !id.includes('whisper') && 
+            !id.includes('embed') && 
+            !id.includes('tts') &&
+            !id.includes('guard')
+          );
+        
+        // Priorizar modelos potentes (70b, 3.3, 3.1, 8b, gemma)
+        chatModels.sort((a: string, b: string) => {
+          const score = (modelId: string) => {
+            let s = 0;
+            if (modelId.includes('70b')) s += 50;
+            if (modelId.includes('llama-3.3')) s += 40;
+            if (modelId.includes('llama-3.1')) s += 30;
+            if (modelId.includes('llama-3.2')) s += 20;
+            if (modelId.includes('8b')) s += 15;
+            if (modelId.includes('gemma')) s += 10;
+            return s;
+          };
+          return score(b) - score(a);
+        });
+
+        if (chatModels.length > 0) {
+          console.log("[Groq Service]: Modelos activos detectados:", chatModels);
+          cachedGroqModels = chatModels;
+          groqModelsCacheTime = now;
+          return cachedGroqModels;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[Groq Models Discovery Warning]:", e);
+  }
+
+  // Lista estática de respaldo en caso de fallo de red
+  return [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "llama3-8b-8192",
+    "gemma2-9b-it",
+    "llama-3.2-3b-preview",
+    "llama-3.2-1b-preview"
+  ];
+}
 
 async function callGroqChat(messages: Array<{ role: string; content: string }>, systemInstruction: string): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
@@ -68,27 +150,41 @@ async function callGroqChat(messages: Array<{ role: string; content: string }>, 
     }))
   ];
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: "llama3-70b-8192",
-      messages: groqMessages,
-      temperature: 0.7,
-      max_tokens: 1024
-    })
-  });
+  const activeModels = await getAvailableGroqModels(apiKey);
+  let lastError: any = null;
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Groq API Error (${response.status}): ${errorText}`);
+  for (const model of activeModels) {
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: groqMessages,
+          temperature: 0.7,
+          max_tokens: 1024
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content;
+        if (content) return content;
+      } else {
+        const errorText = await response.text();
+        console.warn(`[Groq Warning] El modelo ${model} devolvió status ${response.status}:`, errorText);
+        lastError = new Error(`Groq API Error (${response.status}): ${errorText}`);
+      }
+    } catch (err: any) {
+      console.warn(`[Groq Warning] Excepción consultando modelo ${model}:`, err?.message || err);
+      lastError = err;
+    }
   }
 
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || "Sin respuesta";
+  throw lastError || new Error("Todos los modelos de Groq fallaron o no están disponibles.");
 }
 
 
@@ -194,40 +290,47 @@ const vigoTools = [{
 }];
 
 async function generateAIResponse(formattedMessages: Array<{ role: string; content: string }>, systemInstruction: string): Promise<string> {
-  // 1. Intentar primero con Gemini
+  // 1. Intentar primero con Gemini (@google/genai) probando modelos oficiales soportados en cascada
   if (ai) {
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: formattedMessages.map(m => ({
-          role: m.role === 'model' || m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }]
-        })),
-        config: {
-          systemInstruction,
-          tools: vigoTools,
+    const geminiModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    for (const model of geminiModels) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: formattedMessages.map(m => ({
+            role: m.role === 'model' || m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }]
+          })),
+          config: {
+            systemInstruction,
+          }
+        });
+        if (response && response.text) {
+          return response.text;
         }
-      });
-      if (response.text) {
-        return response.text;
+      } catch (geminiError: any) {
+        const errMsg = geminiError?.message || String(geminiError);
+        const isTransient = errMsg.includes("503") || errMsg.includes("429") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand");
+        if (isTransient) {
+          console.warn(`[Gemini API Info]: Modelo ${model} temporalmente con alta demanda (503/429). Probando siguiente alternativa...`);
+        } else {
+          console.warn(`[Gemini API Warning]: Modelo ${model} no disponible:`, errMsg);
+        }
       }
-    } catch (geminiError: any) {
-      console.warn("[Gemini API Warning]: Falló Gemini (posible límite de cuota o error). Intentando fallback a Groq...", geminiError?.message || geminiError);
     }
   }
 
-  // 2. Intentar fallback con Groq
+  // 2. Intentar fallback con Groq (detección dinámica de modelos activos)
   if (process.env.GROQ_API_KEY) {
     try {
       console.log("[AI Service]: Ejecutando consulta con Groq como fallback...");
       return await callGroqChat(formattedMessages, systemInstruction);
     } catch (groqError: any) {
       console.error("[Groq API Error]:", groqError);
-      throw groqError;
     }
   }
 
-  throw new Error("No hay proveedores de IA disponibles o las claves han alcanzado sus límites.");
+  return "Disculpa, en este momento los servidores de IA están experimentando una alta demanda temporal. Por favor, repite tu consulta en unos instantes.";
 }
 
 // --- Telegram Bot Engine (Long Polling + Webhook) ---
@@ -315,47 +418,6 @@ Soy el **Asistente Inteligente de Vigo** (AhorraAI). Estoy aquí para ayudarte a
   await sendTelegramTyping(token, chatId);
 
   try {
-    // 1. Buscar en la base de datos de comercios locales
-    const localCandidates = await getRelevantLocalBusinesses(userText);
-    let localDatabaseResultsText = "No relevant local database results.";
-    let externalSerpapiResultsText = "No external results fetched.";
-
-    if (localCandidates.length > 0) {
-      localDatabaseResultsText = localCandidates.map(b => 
-        `- Nombre: ${b.name}\n  Descripción/Categoría: ${b.description || 'N/A'}\n  Dirección: ${b.address || 'N/A'}\n  Teléfono: ${b.phone || 'N/A'}\n  Web: ${b.website || 'N/A'}\n  Imagen: ${b.cooperation?.image_url || 'N/A'}\n  Source: local_database`
-      ).join('\n\n');
-    } else {
-      // 2. Si no hay candidatos locales, consultar SerpAPI
-      const isGeneral = userText.toLowerCase().includes('historia') || userText.toLowerCase().includes('quién');
-      const searchTerms = userText + (isGeneral ? "" : " en Vigo");
-      
-      const externalResults = isGeneral 
-        ? await serpapiService.searchWeb(searchTerms) 
-        : await serpapiService.searchLocal(searchTerms);
-        
-      if (externalResults && Array.isArray(externalResults) && externalResults.length > 0) {
-        externalSerpapiResultsText = externalResults.slice(0, 5).map((r: any) => 
-          `- Nombre/Título: ${r.title || r.name}\n  Descripción/Tipo: ${r.type || r.snippet || 'N/A'}\n  Dirección: ${r.address || 'N/A'}\n  Teléfono: ${r.phone || 'N/A'}\n  Web: ${r.links?.website || r.link || 'N/A'}\n  Source: serpapi_${isGeneral ? 'web' : 'local'}`
-        ).join('\n\n');
-      }
-    }
-
-    const systemInstruction = `Eres el "Asistente Vigo", el asistente inteligente oficial, turístico y comercial de la ciudad de Vigo (Galicia).
-Tu tono es cálido, cercano, profesional y con un agradable toque vigués/gallego (sin exagerar).
-
-CONTEXTO DE VIGO Y DATOS EN TIEMPO REAL:
-LOCAL_DATABASE_RESULTS (Prioridad #1 - Red de Comercios Locales de Vigo):
-${localDatabaseResultsText}
-
-EXTERNAL_SERPAPI_RESULTS (Prioridad #2 - Resultados en la ciudad):
-${externalSerpapiResultsText}
-
-REGLAS OBLIGATORIAS:
-1. Recomienda con máxima prioridad los comercios y locales de la red cooperativa local si coinciden con la consulta.
-2. Si recomiendas un lugar, incluye su nombre en negrita, dirección, teléfono o enlace si están disponibles.
-3. Sé conciso y claro, con formato adecuado para Telegram (emojis, listas y negritas).
-4. No inventes datos que no estén confirmados.`;
-
     // Obtener historial previo de la conversación en Telegram
     let chatHistory = telegramChatMemory.get(chatId) || [];
     chatHistory.push({ role: 'user', content: userText });
@@ -365,7 +427,13 @@ REGLAS OBLIGATORIAS:
       chatHistory = chatHistory.slice(-10);
     }
 
-    const aiReply = await generateAIResponse(chatHistory, systemInstruction);
+    // 1. Planificación inteligente del Agente de Vigo
+    const plan = vigoAgentPlanner.analyzeIntent(userText, { language: 'Español', userType: 'local' });
+    console.log(`[Telegram VigoBrain] Plan para ${userName}: [${plan.detectedIntents.join(', ')}] | Zona: ${plan.zone || 'Vigo'}`);
+
+    // 2. Ejecución de plan y generación de respuesta estructurada
+    const result = await vigoAgentPlanner.executePlan(plan, chatHistory, { language: 'Español', userType: 'local' });
+    const aiReply = result.finalMessage;
 
     // Guardar respuesta en memoria
     chatHistory.push({ role: 'model', content: aiReply });
@@ -752,35 +820,35 @@ Devuelve EXCLUSIVAMENTE un JSON array con esta forma:
 ]`;
 
         let aiText = "";
-        if (ai) {
-          const resp = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            config: { temperature: 0.3 }
-          });
-          aiText = resp.text || "";
-        } else if (process.env.GROQ_API_KEY) {
-          aiText = await callGroqChat([{ role: 'user', content: prompt }], "Eres un analista comercial de Vigo.");
+        try {
+          aiText = await generateAIResponse(
+            [{ role: 'user', content: prompt }],
+            "Eres el Arquitecto de IA de AhorraAI v4 en Vigo. Devuelve EXCLUSIVAMENTE un JSON array válido."
+          );
+        } catch (aiCallErr) {
+          console.warn("[SerpAPI AI Enrichment generateAIResponse Warning]:", aiCallErr);
         }
 
         const cleanedJson = aiText.replace(/```json/g, '').replace(/```/g, '').trim();
-        const refinements = JSON.parse(cleanedJson);
+        if (cleanedJson.startsWith('[')) {
+          const refinements = JSON.parse(cleanedJson);
 
-        if (Array.isArray(refinements)) {
-          enrichedBusinesses = enrichedBusinesses.map(b => {
-            const match = refinements.find((r: any) => r.id === b.id);
-            if (match) {
-              return {
-                ...b,
-                description: match.refined_description || b.description,
-                cooperation: {
-                  ...b.cooperation,
-                  specialProposal: match.refined_specialProposal || b.cooperation.specialProposal
-                }
-              };
-            }
-            return b;
-          });
+          if (Array.isArray(refinements)) {
+            enrichedBusinesses = enrichedBusinesses.map(b => {
+              const match = refinements.find((r: any) => r.id === b.id);
+              if (match) {
+                return {
+                  ...b,
+                  description: match.refined_description || b.description,
+                  cooperation: {
+                    ...b.cooperation,
+                    specialProposal: match.refined_specialProposal || b.cooperation.specialProposal
+                  }
+                };
+              }
+              return b;
+            });
+          }
         }
       } catch (aiErr) {
         console.warn("[SerpAPI AI Enrichment Warning]:", aiErr);
@@ -889,6 +957,44 @@ app.post("/api/test-serpapi", async (req, res) => {
   }
 });
 
+// Endpoint para el Agente Prospector (AI Parser)
+app.post("/api/agent/parse-prospecting-prompt", async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: "No se proporcionó un prompt" });
+    }
+
+    const systemInstruction = `Eres un agente experto en prospección de negocios en Vigo.
+El usuario te dará una orden (ej: "Busca restaurantes en el Casco Vello y luego ferreterías en Navia").
+Tu tarea es devolver EXCLUSIVAMENTE un JSON con un array de "tasks", donde cada task es un string representando una query a buscar en SerpAPI.
+Trata de formatear la búsqueda optimizándola para Google Maps en Vigo.
+Por ejemplo:
+{
+  "tasks": ["Restaurantes en Casco Vello, Vigo", "Ferreterías en Navia, Vigo"]
+}`;
+    
+    let aiResponse = await generateAIResponse(
+      [{ role: "user", content: prompt }],
+      systemInstruction
+    );
+
+    // Clean JSON markdown if present
+    aiResponse = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    try {
+      const parsed = JSON.parse(aiResponse);
+      return res.json(parsed);
+    } catch (parseError) {
+      console.warn("Could not parse AI response as JSON:", aiResponse);
+      return res.status(500).json({ error: "AI returned invalid JSON" });
+    }
+  } catch (error: any) {
+    console.error("[Parse Prospecting Prompt Error]:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Heurística de relevancia de negocios locales
 const scoreBusiness = (business: any, query: string): number => {
   let score = 0;
@@ -989,7 +1095,22 @@ const getRelevantLocalBusinesses = async (query: string, maxResults = 5) => {
     .slice(0, maxResults);
 };
 
-// --- Endpoint Chat Web ---
+// Conectar los servicios del cerebro con las funciones de datos de la app
+ahorraAIBusinessService.setProviders(
+  () => getAllUnifiedBusinesses(),
+  () => inMemorySynergies
+);
+
+vigoToolExecutor.setSerpApiProviders(
+  (q) => serpapiService.searchLocal(q),
+  (q) => serpapiService.searchWeb(q)
+);
+
+vigoAgentPlanner.setAIGenerator(
+  (msgs, sys) => generateAIResponse(msgs, sys)
+);
+
+// --- Endpoint Chat Web (Impulsado por el Cerebro de Agente de Vigo) ---
 
 app.post("/api/chat", async (req, res) => {
   try {
@@ -999,170 +1120,121 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const lastMessage = messages[messages.length - 1].text;
-    
-    // --- VIGO INTELLIGENCE LAYER ---
-    const lowerMessage = lastMessage.toLowerCase();
-    let vigoContextText = "Sin datos de contexto adicionales del Concello de Vigo.";
-    const isEvents = lowerMessage.match(/hoy|evento|concierto|hacer|agenda|cultura/);
-    const isParking = lowerMessage.match(/aparc|parking|coche/);
-    const isTraffic = lowerMessage.match(/tráfico|trafico|atasco|coche/);
-    const isBus = lowerMessage.match(/bus|vitrasa|parada|transporte/);
-    
-    const vigoContextParts = [];
-    
-    if (isParking) {
-       const pData = await mobilityService.getParkingStatus();
-       if (pData.healthy && pData.data) {
-          vigoContextParts.push(`[PARKING EN TIEMPO REAL - Actualizado: ${pData.retrieved_at} | Fuente: ${pData.source}]:\n` + JSON.stringify(Array.isArray(pData.data) ? pData.data.slice(0, 10) : pData.data).substring(0, 500));
-       } else {
-          vigoContextParts.push(`[PARKING EN TIEMPO REAL]: No tengo datos actualizados de parking en este momento.`);
-       }
-    }
-    
-    if (isTraffic) {
-       const tData = await mobilityService.getTrafficStatus();
-       if (tData.healthy && tData.data) {
-          vigoContextParts.push(`[TRÁFICO EN TIEMPO REAL - Actualizado: ${tData.retrieved_at} | Fuente: ${tData.source}]:\n` + JSON.stringify(Array.isArray(tData.data) ? tData.data.slice(0, 5) : tData.data).substring(0, 500));
-       }
-       const alertsData = await mobilityService.getTrafficAlerts();
-       if (alertsData.healthy && alertsData.data) {
-          vigoContextParts.push(`[AVISOS DE TRÁFICO - Actualizado: ${alertsData.retrieved_at} | Fuente: ${alertsData.source}]:\n` + JSON.stringify(Array.isArray(alertsData.data) ? alertsData.data.slice(0, 5) : alertsData.data).substring(0, 500));
-       }
-    }
-    
-    if (isEvents) {
-       const eData = await eventsService.getEvents();
-       if (eData.healthy && eData.data) {
-          vigoContextParts.push(`[AGENDA CULTURAL - Actualizado: ${eData.retrieved_at} | Fuente: ${eData.source}]:\n` + JSON.stringify(Array.isArray(eData.data) ? eData.data.slice(0, 5) : eData.data).substring(0, 500));
-       } else {
-          vigoContextParts.push(`[AGENDA CULTURAL]: No tengo datos actualizados de la agenda en este momento.`);
-       }
-    }
-    
-    if (vigoContextParts.length > 0) {
-        vigoContextText = vigoContextParts.join('\n\n');
-    }
-    // -------------------------------
-
-    
-    let localDatabaseResultsText = "No relevant local database results.";
-    let externalSerpapiResultsText = "No external results fetched.";
-    
-    // 1. Buscar en Supabase
-    const localCandidates = await getRelevantLocalBusinesses(lastMessage);
-
-    let synergiesText = "No hay sinergias ni packs activos en este momento.";
-    if (inMemorySynergies.length > 0) {
-      const candidateIds = new Set(localCandidates.map(b => b.id));
-      const relevantSynergies = inMemorySynergies.filter(s => candidateIds.has(s.businessA_id) || candidateIds.has(s.businessB_id));
-      
-      const synergiesToUse = relevantSynergies.length > 0 ? relevantSynergies : inMemorySynergies.slice(0, 5);
-      
-      if (synergiesToUse.length > 0) {
-        synergiesText = synergiesToUse.map(s => 
-          `- [Pack / Sinergia]: ${s.title}\n  Participantes: ${s.businessA_name} y ${s.businessB_name}\n  Descripción: ${s.description}`
-        ).join('\n\n');
-      }
-    }
-
-    if (localCandidates.length > 0) {
-      localDatabaseResultsText = localCandidates.map(b => 
-        `- Nombre: ${b.name}\n  Descripción/Categoría: ${b.description || 'N/A'}\n  Dirección: ${b.address || 'N/A'}\n  Teléfono: ${b.phone || 'N/A'}\n  Web: ${b.website || 'N/A'}\n  Imagen: ${b.cooperation?.image_url || 'N/A'}\n  Source: local_database`
-      ).join('\n\n');
-    } else {
-      // 2. Fallback a SerpAPI si no hay suficientes candidatos locales
-      const isGeneral = lastMessage.toLowerCase().includes('historia') || lastMessage.toLowerCase().includes('quién');
-      
-      const searchTerms = lastMessage + (isGeneral ? "" : " en Vigo");
-      console.log(`[Chat API] Sin resultados locales. Buscando en SerpAPI: ${searchTerms} (general: ${isGeneral})`);
-      
-      const externalResults = isGeneral 
-        ? await serpapiService.searchWeb(searchTerms) 
-        : await serpapiService.searchLocal(searchTerms);
-        
-      if (externalResults && Array.isArray(externalResults) && externalResults.length > 0) {
-        externalSerpapiResultsText = externalResults.slice(0, 5).map((r: any) => 
-          `- Nombre/Título: ${r.title || r.name}\n  Descripción/Tipo: ${r.type || r.snippet || 'N/A'}\n  Dirección: ${r.address || 'N/A'}\n  Teléfono: ${r.phone || 'N/A'}\n  Web: ${r.links?.website || r.link || 'N/A'}\n  Source: serpapi_${isGeneral ? 'web' : 'local'}`
-        ).join('\n\n');
-      } else {
-        externalSerpapiResultsText = "Búsqueda externa realizada pero sin resultados relevantes.";
-      }
-    }
-
-    const systemInstruction = `Eres el "Asistente Vigo", el mejor asistente turístico y local de Vigo (Galicia).
-Tu tono es cercano, útil y tienes un ligero toque de humor gallego (usando alguna expresión típica si procede, pero sin exagerar).
-Responde en el idioma indicado por el usuario.
-
-Configuración del usuario:
-- Tipo de usuario: ${config?.userType === 'local' ? 'Residente / Local' : (config?.userType === 'business' ? 'Comercio Local' : 'Turista / Visita')}
-- Tiempo disponible: ${config?.timeAvailable || 'No especificado'}
-- Intereses: ${config?.interests?.join(', ') || 'No especificado'}
-- Idioma preferido: ${config?.language || 'Español'}
-
-CONTEXTO ESTRUCTURADO DE NEGOCIOS Y SERVICIOS:
-
-LOCAL_DATABASE_RESULTS (Prioridad #1 - Red Local Cooperativa):
-${localDatabaseResultsText}
-
-EXTERNAL_SERPAPI_RESULTS (Prioridad #2 - Resultados Externos):
-${externalSerpapiResultsText}
-
-OFERTAS CRUZADAS Y PACKS ACTIVOS EN VIGO (Sinergias):
-${synergiesText}
-
-VIGO_CONTEXT (Datos oficiales del Concello de Vigo – Prioridad #1.5):
-${vigoContextText}
-
-REGLAS ADICIONALES PARA VIGO_CONTEXT:
-- Usa estos datos cuando aporten valor real (eventos, parking libre, tráfico, avisos, transporte).
-- Cruza siempre con LOCAL_DATABASE_RESULTS y sinergias cuando sea posible.
-- Ejemplo de respuesta potente: "Hoy hay concierto en X a las 21:00. Parking Urzáiz tiene 42 plazas libres (actualizado hace 2 min). Tráfico moderado. Te recomiendo [negocio de la red] a 5 min andando + pack con Y."
-- Nunca inventes datos que no vengan en VIGO_CONTEXT.
-- Indica siempre la fuente y la hora de actualización cuando uses datos dinámicos.
-- Si un feed está unhealthy, dilo ("No tengo datos actualizados de parking en este momento").
-
-SOURCE_POLICY (REGLAS ESTRICTAS):
-1. La base de datos local (LOCAL_DATABASE_RESULTS) tiene PRIORIDAD ABSOLUTA. Si hay negocios aquí, recomiéndalos primero.
-2. No inventes negocios, horarios, precios, teléfonos, webs ni reseñas.
-3. Si un negocio procede de LOCAL_DATABASE_RESULTS, preséntalo como parte de nuestra red local de negocios.
-4. Si un negocio procede de EXTERNAL_SERPAPI_RESULTS, indícalo de forma natural como información encontrada externamente en Internet, aclarando que aún no forman parte de nuestra red local.
-5. Si hay mezcla de ambos: menciona primero los de la red local, y luego opciones externas útiles.
-6. Nunca afirmes que un negocio está abierto si no tienes el dato real.
-7. Nunca rellenes huecos con tu imaginación (cero alucinaciones).
-8. Si no hay información suficiente en ninguna de las dos fuentes, dilo claramente. No inventes alternativas falsas.
-9. Respeta el idioma seleccionado por el usuario en toda tu respuesta.
-10. ¡MUY IMPORTANTE! Tienes a tu disposición la sección "OFERTAS CRUZADAS Y PACKS ACTIVOS". Si el usuario pregunta por algo relacionado con esos negocios o perfiles (ej. si es turista, o si busca gimnasios, farmacias, restaurantes...), DEBES proponerle proactivamente ese "pack" o "bono cruzado". Ej: "Por cierto, si vas a X, tienen un pack especial con Y que incluye...". Esto da visibilidad a la red cooperativa de la ciudad.
-
-REGLAS DE FORMATO Y PRESENTACIÓN VISUAL (ESTRICTAS):
-Cuando recomiendes uno o más negocios, DEBES presentarlos de manera muy atractiva y estructurada, usando Markdown, emojis y separadores.
-Para CADA negocio que recomiendes, aplica exactamente esta estructura (y evita siempre usar tablas):
-
-### 🏪 [Nombre del Negocio]
-*Una frase corta y atractiva describiendo por qué lo recomiendas.*
-- 📍 **Dirección:** [[Dirección]](https://www.google.com/maps/search/?api=1&query=DIRECCION_DEL_NEGOCIO+VIGO)
-- 🌐 **Web:** [Enlace a la web si existe, ej: [Visitar Web](URL)]
-- 🗺️ **Google Maps:** [Cómo llegar](https://www.google.com/maps/search/?api=1&query=NOMBRE+DEL+NEGOCIO+VIGO)
-- 📞 **Teléfono:** [[Teléfono si está disponible]](tel:NUMERO_AQUI)
-
-*(Si el negocio tiene una URL de Imagen válida en los datos que te paso, muéstrala aquí usando markdown: ![Foto](URL))*
-
-*(Añade un breve párrafo extra aquí si este negocio tiene un Pack/Sinergia activo, destacándolo con un emoji 🎁)*
-
---- 
-
-Asegúrate de que los enlaces sean clickeables en Markdown. NUNCA uses tablas para listar negocios, usa siempre esta estructura visual vertical y clara.
-`;
-
     const formattedMessages = messages.map((m: any) => ({
       role: m.isBot ? 'model' : 'user',
       content: m.text
     }));
 
-    const text = await generateAIResponse(formattedMessages, systemInstruction);
-    res.json({ text });
+    // 1. Comprensión de intención y Planificación dinámica de fuentes
+    const plan = vigoAgentPlanner.analyzeIntent(lastMessage, config);
+    console.log(`[VigoAgentPlanner]: Intenciones detectadas: [${plan.detectedIntents.join(', ')}] | Zona: ${plan.zone || 'Global Vigo'} | Fuente prioritaria: ${plan.prioritySource}`);
+
+    // 2. Ejecución, Selección inteligente de tools, Validación y Razonamiento
+    const result = await vigoAgentPlanner.executePlan(plan, formattedMessages, config);
+
+    res.json({ 
+      text: result.finalMessage,
+      sourcesUsed: result.sourcesUsed,
+      reasoning: result.reasoning,
+      executionTimeMs: result.executionTimeMs,
+      structuredData: result.structuredData,
+      debugTrace: result.debugTrace
+    });
   } catch (e: any) {
     console.error("[Chat API Error]:", e);
     res.status(500).json({ error: "Error de comunicación con el asistente. " + (e?.message || "") });
+  }
+});
+
+// --- Endpoints de Diagnóstico, Salud y Auditoría del Cerebro de Vigo ---
+app.get("/api/brain/health", async (req, res) => {
+  try {
+    const checks = await vigoDataRegistry.runHealthChecks();
+    const sources = vigoDataRegistry.getSources();
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      sources,
+      checks
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/brain/sources", (req, res) => {
+  res.json({
+    sources: vigoDataRegistry.getSources()
+  });
+});
+
+app.post("/api/brain/plan", (req, res) => {
+  const { query, config } = req.body;
+  if (!query) return res.status(400).json({ error: "query requerida" });
+  const plan = vigoAgentPlanner.analyzeIntent(query, config);
+  res.json({ plan });
+});
+
+app.post("/api/brain/audit", async (req, res) => {
+  try {
+    const { query, config } = req.body;
+    if (!query) return res.status(400).json({ error: "query requerida" });
+    const plan = vigoAgentPlanner.analyzeIntent(query, config);
+    const messages = [{ role: 'user', content: query }];
+    const result = await vigoAgentPlanner.executePlan(plan, messages, config);
+    res.json({
+      query,
+      plan,
+      debugTrace: result.debugTrace,
+      factsCollected: result.rawFacts.length,
+      sourcesUsed: result.sourcesUsed,
+      executionTimeMs: result.executionTimeMs,
+      finalMessage: result.finalMessage
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/brain/weather", async (req, res) => {
+  try {
+    const w = await weatherProvider.getWeather();
+    res.json(w);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/brain/historical/:dataset", async (req, res) => {
+  try {
+    const { dataset } = req.params;
+    const { metric, location, month, dayOfWeek, expr } = req.query;
+    const comparison = await vigoHistoricalDataService.getHistoricalComparison(dataset, {
+      metric: metric as string,
+      location: location as string,
+      month: month ? parseInt(month as string, 10) : undefined,
+      dayOfWeek: dayOfWeek ? parseInt(dayOfWeek as string, 10) : undefined,
+      temporalExpression: expr as string
+    });
+    res.json(comparison);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/brain/temporal-resolve", (req, res) => {
+  const { query } = req.body;
+  if (!query) return res.status(400).json({ error: "query requerida" });
+  const resolution = vigoTimeResolver.resolveTemporal(query);
+  res.json({ resolution });
+});
+
+app.get("/api/brain/catalog", async (req, res) => {
+  try {
+    const pkgs = await catalogService.getPackageList();
+    res.json(pkgs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1196,6 +1268,7 @@ interface MemoryCoopBusiness {
     preferredPartners: string[];
     valleyHours: string;
     specialProposal?: string;
+    image_url?: string;
   };
   is_active: boolean;
   created_at: string;
@@ -1223,12 +1296,13 @@ const inMemoryCoopBusinesses: MemoryCoopBusiness[] = [];
 
 let inMemorySynergies: MemorySynergy[] = [];
 
-// Función para generar código de acceso único
+// Función para generar código de acceso único y robusto sin colisiones
 function generateBusinessAccessCode(name: string, zone?: string): string {
   const prefix = "VIGO";
-  const randomNum = Math.floor(1000 + Math.random() * 9000);
+  const randomNum = Math.floor(10000 + Math.random() * 90000);
   const cleanZone = (zone || name).replace(/[^a-zA-Z]/g, '').substring(0, 4).toUpperCase() || "COMM";
-  return `${prefix}-${randomNum}-${cleanZone}`;
+  const salt = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${prefix}-${randomNum}-${cleanZone}-${salt}`;
 }
 
 // Normalizador y enriquecedor para cualquier registro de negocio (Supabase o memoria)
@@ -1547,15 +1621,13 @@ Devuelve EXCLUSIVAMENTE un JSON array con esta estructura:
 ]`;
 
     let generatedText = "";
-    if (ai) {
-      const resp = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: { temperature: 0.2 }
-      });
-      generatedText = resp.text || "";
-    } else if (process.env.GROQ_API_KEY) {
-      generatedText = await callGroqChat([{ role: 'user', content: prompt }], "Eres un consultor experto en alianzas comerciales locales.");
+    try {
+      generatedText = await generateAIResponse(
+        [{ role: 'user', content: prompt }],
+        "Eres el cerebro de Inteligencia Artificial del ecosistema AhorraAI v4 en Vigo. Devuelve únicamente un JSON array válido."
+      );
+    } catch (aiGenErr) {
+      console.warn("[Synergy AI Generation Warning]: Fallback a heurísticas determinísticas:", aiGenErr);
     }
 
     const cleanedJson = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();

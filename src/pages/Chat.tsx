@@ -351,7 +351,13 @@ export default function Chat() {
       
       if (data.error) throw new Error(data.error);
 
-      setMessages(prev => [...prev, { id: Date.now().toString(), text: data.text, isBot: true }]);
+      setMessages(prev => [...prev, { 
+        id: Date.now().toString(), 
+        text: data.text, 
+        isBot: true,
+        sourcesUsed: data.sourcesUsed,
+        debugTrace: data.debugTrace
+      }]);
     } catch (err: any) {
       console.error(err);
       setMessages(prev => [...prev, { 
@@ -748,19 +754,46 @@ export default function Chat() {
       </header>
 
       <main className="flex-1 overflow-y-auto p-4 space-y-6">
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.isBot ? 'justify-start' : 'justify-end'}`}>
-            <div 
-              className={`max-w-[85%] rounded-[20px] px-5 py-3.5 shadow-sm leading-relaxed ${
-                msg.isBot 
-                  ? 'bg-[#1C1C1E] text-[#EBEBF5] border border-white/5 rounded-tl-sm' 
-                  : 'bg-[#0A84FF] text-white rounded-tr-sm shadow-md'
-              }`}
-            >
-              <p className="whitespace-pre-wrap">{msg.text}</p>
+        {messages.map((msg) => {
+          const sourceBadgeMap: Record<string, string> = {
+            'supabase_business_db': '🏪 Comercios Locales (AhorraAI)',
+            'vigo_official_weather': '⛅ Previsión Meteorológica',
+            'vigo_realtime_parking': '🅿️ Sensores Parking (Concello)',
+            'vigo_realtime_traffic': '🚦 Tráfico y Avisos (Concello)',
+            'vigo_events_agenda': '🏛️ Agenda Cultural Oficial',
+            'vigo_historical_memory': '📜 Memoria Histórica',
+            'vigo_verified_context': '🗺️ Geografía y Patrimonio',
+            'external_serpapi': '🌐 Google Maps / Web'
+          };
+
+          return (
+            <div key={msg.id} className={`flex flex-col ${msg.isBot ? 'items-start' : 'items-end'}`}>
+              <div 
+                className={`max-w-[85%] rounded-[20px] px-5 py-3.5 shadow-sm leading-relaxed ${
+                  msg.isBot 
+                    ? 'bg-[#1C1C1E] text-[#EBEBF5] border border-white/5 rounded-tl-sm' 
+                    : 'bg-[#0A84FF] text-white rounded-tr-sm shadow-md'
+                }`}
+              >
+                <p className="whitespace-pre-wrap">{msg.text}</p>
+              </div>
+
+              {/* Badges de Fuentes Verificadas */}
+              {msg.isBot && msg.sourcesUsed && msg.sourcesUsed.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2 ml-1 max-w-[85%]">
+                  {msg.sourcesUsed.map((srcKey) => (
+                    <span 
+                      key={srcKey}
+                      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-white/5 text-white/70 border border-white/10"
+                    >
+                      {sourceBadgeMap[srcKey] || srcKey}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
         {loading && (
           <div className="flex justify-start">
             <div className="bg-[#1C1C1E] text-white/50 px-5 py-4 rounded-[20px] border border-white/5 rounded-tl-sm shadow-sm flex space-x-2 items-center">
@@ -798,19 +831,19 @@ export default function Chat() {
 
   return (
     <>
-      {/* Botones de Cabecera Flotantes para pantallas previas al chat */}
-      {step !== 'chat' && (
+      {/* Botones de Cabecera Flotantes para pantallas previas al chat (excepto en la pantalla de bienvenida pura) */}
+      {step !== 'chat' && step !== 'welcome' && (
         <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
           <button
             onClick={handleOpenTelegram}
-            className="p-2.5 text-sky-400 bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] border border-sky-500/30 rounded-full shadow-lg backdrop-blur-xl transition-all active:scale-95"
+            className="p-2.5 text-sky-400 bg-[#1C1C1E]/90 hover:bg-[#2C2C2E] border border-sky-500/30 rounded-full shadow-lg backdrop-blur-xl transition-all active:scale-95"
             title="Abrir bot en Telegram"
           >
             <Send size={18} className="-rotate-12" />
           </button>
           <Link 
             to="/admin" 
-            className="p-2.5 text-white/50 hover:text-white bg-[#1C1C1E]/80 hover:bg-[#2C2C2E] rounded-full shadow-lg backdrop-blur-xl transition-all border border-white/10"
+            className="p-2.5 text-white/60 hover:text-white bg-[#1C1C1E]/90 hover:bg-[#2C2C2E] rounded-full shadow-lg backdrop-blur-xl transition-all border border-white/10"
             title="Panel de Administración"
           >
             <Shield size={18} />

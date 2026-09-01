@@ -9,6 +9,9 @@ export interface ChatMessage {
   id: string;
   text: string;
   isBot: boolean;
+  sourcesUsed?: string[];
+  debugTrace?: any;
+  presentation?: any;
 }
 
 export interface UserProfile {
@@ -28,6 +31,8 @@ export interface BusinessCooperationProfile {
   preferredPartners: string[]; // hostelería, comercio, salud, hoteles, etc.
   valleyHours: string; // ej. "16:00 - 19:30"
   specialProposal?: string;
+  image_url?: string;
+  cover_image?: string;
 }
 
 export interface Business {

@@ -15,6 +15,8 @@ import AdminBusiness from './pages/admin/AdminBusiness';
 import AdminBusinessesList from './pages/admin/AdminBusinessesList';
 import AdminChats from './pages/admin/AdminChats';
 import AdminCooperationGraph from './pages/admin/AdminCooperationGraph';
+import AdminMap from './pages/admin/AdminMap';
+import AdminProspector from './pages/admin/AdminProspector';
 
 export default function App() {
   return (
@@ -26,9 +28,11 @@ export default function App() {
         <Route path="/cooperacion" element={<BusinessPortal />} />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminDashboard />} />
+          <Route path="prospector" element={<AdminProspector />} />
           <Route path="cooperacion" element={<AdminCooperationGraph />} />
           <Route path="business" element={<AdminBusiness />} />
           <Route path="businesses" element={<AdminBusinessesList />} />
+          <Route path="map" element={<AdminMap />} />
           <Route path="chats" element={<AdminChats />} />
           <Route path="config" element={<AdminConfig />} />
         </Route>

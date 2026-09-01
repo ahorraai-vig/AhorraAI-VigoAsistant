@@ -153,23 +153,43 @@ export default function AdminConfig() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        throw new Error("No estás autenticado en Supabase.");
+        throw new Error("No estás autenticado en Supabase. Inicia sesión en el panel primero.");
       }
 
-      // Fetch existing businesses to deduplicate
+      // 1. Obtener todos los comercios existentes con id, access_code y campos clave
       const { data: existingBusinesses, error: fetchError } = await supabase
         .from('businesses')
-        .select('name, address, phone, website');
+        .select('id, name, address, phone, website, access_code');
         
       if (fetchError) {
         console.error("Error fetching existing businesses:", fetchError);
       }
       
       const existing = existingBusinesses || [];
-      const normalize = (str: string) => (str || '').toLowerCase().trim();
+      const usedAccessCodes = new Set<string>(
+        existing.map(b => (b.access_code || '').trim().toUpperCase()).filter(Boolean)
+      );
+
+      const normalize = (str: string) => 
+        (str || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
       
-      let dupCount = 0;
-      const businessesToInsert = [];
+      const generateUniqueCode = (name: string, zone?: string) => {
+        const cleanZone = (zone || name).replace(/[^a-zA-Z]/g, '').substring(0, 4).toUpperCase() || "COMM";
+        let code = '';
+        let attempts = 0;
+        do {
+          const randNum = Math.floor(10000 + Math.random() * 90000);
+          const salt = Math.random().toString(36).substring(2, 6).toUpperCase();
+          code = `VIGO-${randNum}-${cleanZone}-${salt}`;
+          attempts++;
+        } while (usedAccessCodes.has(code) && attempts < 100);
+        usedAccessCodes.add(code);
+        return code;
+      };
+
+      let insertedCount = 0;
+      let updatedCount = 0;
+      const errorsList: string[] = [];
 
       for (const biz of enrichedBusinesses) {
         const placeName = biz.name || 'Negocio Desconocido';
@@ -177,55 +197,105 @@ export default function AdminConfig() {
         const placePhone = biz.phone || '';
         const placeWebsite = biz.website || '';
         
-        // Deduplication rules
-        const isDuplicate = existing.some(b => {
+        // Comprobar si ya existe en Supabase
+        const existingMatch = existing.find(b => {
           if (b.website && placeWebsite && normalize(b.website) === normalize(placeWebsite)) return true;
           if (b.phone && placePhone && normalize(b.phone) === normalize(placePhone)) return true;
-          if (normalize(b.name) === normalize(placeName) && normalize(b.address) === normalize(placeAddress)) return true;
+          if (normalize(b.name) === normalize(placeName) && (
+            !b.address || !placeAddress || normalize(b.address).includes(normalize(placeAddress)) || normalize(placeAddress).includes(normalize(b.address))
+          )) return true;
+          if (biz.access_code && b.access_code && b.access_code.toUpperCase() === biz.access_code.toUpperCase()) return true;
           return false;
         });
-        
-        if (isDuplicate) {
-          dupCount++;
-          continue;
+
+        if (existingMatch) {
+          // Actualizar registro existente conservando su ID y su access_code previo
+          const updatePayload: any = {
+            name: placeName,
+            description: biz.description || undefined,
+            address: placeAddress || undefined,
+            phone: placePhone || undefined,
+            website: placeWebsite || undefined,
+            opening_hours: biz.opening_hours || {},
+            category: biz.category || undefined,
+            zone: biz.zone || undefined,
+            honesty_status: biz.honesty_status || 'OBSERVADO',
+            time_slots: biz.time_slots || undefined,
+            cooperation: biz.cooperation || undefined,
+            is_active: true,
+            updated_at: new Date().toISOString()
+          };
+
+          const { error: updateErr } = await supabase
+            .from('businesses')
+            .update(updatePayload)
+            .eq('id', existingMatch.id);
+
+          if (updateErr) {
+            console.warn(`[Supabase Update Error for ${placeName}]:`, updateErr);
+            errorsList.push(`${placeName}: ${updateErr.message}`);
+          } else {
+            updatedCount++;
+          }
+        } else {
+          // Crear nuevo registro garantizando access_code único sin colisiones
+          let safeAccessCode = (biz.access_code || '').trim().toUpperCase();
+          if (!safeAccessCode || usedAccessCodes.has(safeAccessCode)) {
+            safeAccessCode = generateUniqueCode(placeName, biz.zone);
+          } else {
+            usedAccessCodes.add(safeAccessCode);
+          }
+
+          const insertPayload: any = {
+            name: placeName,
+            description: biz.description || '',
+            address: placeAddress,
+            phone: placePhone,
+            website: placeWebsite,
+            opening_hours: biz.opening_hours || {},
+            category: biz.category || 'Comercio Local',
+            zone: biz.zone || 'Vigo Centro',
+            access_code: safeAccessCode,
+            honesty_status: biz.honesty_status || 'OBSERVADO',
+            time_slots: biz.time_slots || { morning: "", afternoon: "", night: "" },
+            cooperation: biz.cooperation || {},
+            is_active: true,
+            owner_id: user.id
+          };
+
+          const { error: insertErr } = await supabase
+            .from('businesses')
+            .insert(insertPayload);
+
+          if (insertErr) {
+            console.warn(`[Supabase Insert Error for ${placeName}]:`, insertErr);
+            // Reintentar con nuevo código generado por si hubiera colisión remota
+            if (insertErr.message?.includes('access_code')) {
+              insertPayload.access_code = generateUniqueCode(placeName, biz.zone);
+              const { error: retryErr } = await supabase.from('businesses').insert(insertPayload);
+              if (!retryErr) {
+                insertedCount++;
+                continue;
+              }
+            }
+            errorsList.push(`${placeName}: ${insertErr.message}`);
+          } else {
+            insertedCount++;
+          }
         }
-
-        const insertPayload: any = {
-          name: placeName,
-          description: biz.description || '',
-          address: placeAddress,
-          phone: placePhone,
-          website: placeWebsite,
-          opening_hours: biz.opening_hours || {},
-          is_active: true,
-          owner_id: user.id
-        };
-
-        // Si existen los nuevos campos estructurados, añadirlos al objeto
-        if (biz.category) insertPayload.category = biz.category;
-        if (biz.zone) insertPayload.zone = biz.zone;
-        if (biz.access_code) insertPayload.access_code = biz.access_code;
-        if (biz.honesty_status) insertPayload.honesty_status = biz.honesty_status;
-        if (biz.time_slots) insertPayload.time_slots = biz.time_slots;
-        if (biz.cooperation) insertPayload.cooperation = biz.cooperation;
-
-        businessesToInsert.push(insertPayload);
-        
-        existing.push({ name: placeName, address: placeAddress, phone: placePhone, website: placeWebsite });
       }
 
-      if (businessesToInsert.length > 0) {
-        const { error } = await supabase
-          .from('businesses')
-          .insert(businessesToInsert);
-          
-        if (error) throw error;
+      if (errorsList.length > 0 && insertedCount === 0 && updatedCount === 0) {
+        setImportMessage({ 
+          type: 'error', 
+          text: `Error al guardar en Supabase: ${errorsList[0]}` 
+        });
+      } else {
+        setImportMessage({ 
+          type: 'success', 
+          text: `Supabase sincronizado: ${insertedCount} nuevos comercios insertados, ${updatedCount} actualizados con datos enriquecidos.` 
+        });
       }
-      
-      setImportMessage({ 
-        type: 'success', 
-        text: `Supabase: ${businessesToInsert.length} nuevos insertados, ${dupCount} duplicados omitidos.` 
-      });
     } catch (error: any) {
       setImportMessage({ type: 'error', text: `Error al importar a Supabase: ${error.message}` });
     } finally {

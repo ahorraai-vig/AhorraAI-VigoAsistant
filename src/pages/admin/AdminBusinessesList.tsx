@@ -467,83 +467,81 @@ export default function AdminBusinessesList() {
             </button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-600">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-800 font-medium text-xs">
-                <tr>
-                  <th className="px-5 py-3.5">Nombre & Clave</th>
-                  <th className="px-5 py-3.5">Sector & Zona</th>
-                  <th className="px-5 py-3.5">Dirección</th>
-                  <th className="px-5 py-3.5">Honestidad</th>
-                  <th className="px-5 py-3.5">Estado</th>
-                  <th className="px-5 py-3.5 text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredBusinesses.map(biz => (
-                  <tr key={biz.id} className="hover:bg-slate-50 transition">
-                    <td className="px-5 py-3.5">
-                      <div className="font-medium text-slate-900">{biz.name}</div>
-                      {biz.access_code && (
-                        <div className="text-[11px] font-mono text-blue-600 flex items-center gap-1 mt-0.5">
-                          <Key size={10} />
-                          <span>{biz.access_code}</span>
+          <div className="p-6 space-y-8">
+            {Object.entries(
+              filteredBusinesses.reduce((acc, biz) => {
+                const category = biz.category || 'Otros';
+                if (!acc[category]) acc[category] = [];
+                acc[category].push(biz);
+                return acc;
+              }, {} as Record<string, any[]>)
+            ).sort(([a], [b]) => a.localeCompare(b)).map(([category, rawBizList]) => {
+              const bizList = rawBizList as any[];
+              return (
+              <div key={category} className="space-y-4">
+                <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                  <Tag size={18} className="text-blue-500" />
+                  {category} <span className="text-sm font-normal text-slate-500">({bizList.length})</span>
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {bizList.map((biz: any) => (
+                    <div key={biz.id} className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md transition-shadow relative group">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="font-semibold text-slate-900 truncate pr-4" title={biz.name}>{biz.name}</div>
+                        <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity absolute top-4 right-4 bg-white/80 rounded-md backdrop-blur-sm">
+                          <button onClick={() => handleEdit(biz)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition" title="Editar">
+                            <Edit2 size={15} />
+                          </button>
+                          <button onClick={() => handleDelete(biz.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition" title="Eliminar">
+                            <Trash2 size={15} />
+                          </button>
                         </div>
-                      )}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="text-xs font-medium text-slate-800">{biz.category || 'Comercio Local'}</div>
-                      <div className="text-[11px] text-slate-400">{biz.zone || 'Vigo'}</div>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center space-x-1 text-slate-500 text-xs">
-                        <MapPin size={13} className="shrink-0" />
-                        <span className="truncate max-w-[180px]">{biz.address || 'Sin dirección'}</span>
                       </div>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        biz.honesty_status === 'DICHO' 
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                          : 'bg-amber-50 text-amber-700 border border-amber-200'
-                      }`}>
-                        <ShieldCheck size={10} className="mr-1" />
-                        {biz.honesty_status || 'OBSERVADO'}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      {biz.is_active ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
-                          <CheckCircle2 size={11} className="mr-1" /> Activo
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
-                          <XCircle size={11} className="mr-1" /> Inactivo
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <div className="flex items-center justify-end space-x-2">
-                        <button 
-                          onClick={() => handleEdit(biz)}
-                          className="text-blue-600 hover:text-blue-800 transition p-1"
-                          title="Editar"
-                        >
-                          <Edit2 size={15} />
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(biz.id)}
-                          className="text-red-500 hover:text-red-700 transition p-1"
-                          title="Eliminar"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                      
+                      <div className="text-xs text-slate-500 space-y-1.5 mb-3">
+                        {biz.access_code && (
+                          <div className="flex items-center gap-1.5 text-blue-600 font-mono bg-blue-50 px-2 py-0.5 rounded-md inline-flex">
+                            <Key size={12} />
+                            <span>{biz.access_code}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1.5 truncate" title={biz.address || 'Sin dirección'}>
+                          <MapPin size={13} className="shrink-0" />
+                          <span>{biz.address || 'Sin dirección'}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <MapPin size={13} className="shrink-0 opacity-0" /> {/* Spacer */}
+                          <span>Zona: {biz.zone || 'Vigo'}</span>
+                        </div>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+                      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-100">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          biz.honesty_status === 'DICHO' 
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        }`}>
+                          <ShieldCheck size={10} className="mr-1" />
+                          {biz.honesty_status || 'OBSERVADO'}
+                        </span>
+                        
+                        {biz.is_active ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 ml-auto">
+                            <CheckCircle2 size={10} className="mr-1" /> Activo
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-800 ml-auto">
+                            <XCircle size={10} className="mr-1" /> Inactivo
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              );
+            })}
           </div>
         )}
       </div>

@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Store, MessageSquare, Settings, LogOut, Menu, X, ArrowLeft, Handshake } from 'lucide-react';
+import { LayoutDashboard, Store, MessageSquare, Settings, LogOut, Menu, X, ArrowLeft, Handshake, MapPin, Bot } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
@@ -73,9 +73,11 @@ export default function AdminLayout() {
 
   const navItems = [
     { name: 'Dashboard', path: '/admin', icon: <LayoutDashboard size={20} />, roles: ['admin', 'business'] },
+    { name: 'Agente Prospector', path: '/admin/prospector', icon: <Bot size={20} />, roles: ['admin'] },
     { name: 'Grafo de Cooperación', path: '/admin/cooperacion', icon: <Handshake size={20} />, roles: ['admin'] },
     { name: 'Mi Negocio', path: '/admin/business', icon: <Store size={20} />, roles: ['business'] },
     { name: 'Negocios (Todos)', path: '/admin/businesses', icon: <Store size={20} />, roles: ['admin'] },
+    { name: 'Mapa de Negocios', path: '/admin/map', icon: <MapPin size={20} />, roles: ['admin'] },
     { name: 'Conversaciones', path: '/admin/chats', icon: <MessageSquare size={20} />, roles: ['admin'] },
     { name: 'Configuración', path: '/admin/config', icon: <Settings size={20} />, roles: ['admin'] },
   ];
