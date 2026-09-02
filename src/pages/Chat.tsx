@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Send, MapPin, Utensils, ShoppingBag, Palmtree, Landmark, Settings, Shield, Store, MessageSquare, ExternalLink, Handshake, Key, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Send, MapPin, Utensils, ShoppingBag, Palmtree, Landmark, Settings, Shield, Store, MessageSquare, ExternalLink, Handshake, Key, Plus, ChevronLeft, ChevronRight, Mic, MicOff, Camera, Paperclip, X, Ear, EarOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChatConfig, ChatMessage } from '../types';
 import { supabase } from '../lib/supabase';
@@ -258,6 +258,12 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [accessibilityMode, setAccessibilityMode] = useState(false);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -329,14 +335,72 @@ export default function Chat() {
     }
   };
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setAttachedImage(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
 
-    const userMessage: ChatMessage = { id: Date.now().toString(), text: input, isBot: false };
+  const toggleRecording = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    
+    // @ts-ignore
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Tu navegador no soporta reconocimiento de voz.");
+      return;
+    }
+    
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'es-ES';
+    recognition.interimResults = true;
+    
+    recognition.onresult = (event: any) => {
+      const transcript = Array.from(event.results)
+        .map((result: any) => result[0].transcript)
+        .join('');
+      setInput(transcript);
+    };
+    
+    recognition.onend = () => setIsRecording(false);
+    recognition.onerror = () => setIsRecording(false);
+    
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+  };
+
+  const speakText = (text: string) => {
+    if (!accessibilityMode || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'es-ES';
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const sendMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if ((!input.trim() && !attachedImage) || loading) return;
+
+    const userMessage: ChatMessage = { id: Date.now().toString(), text: input, isBot: false, image: attachedImage || undefined };
     setMessages(prev => [...prev, userMessage]);
+    const currentInput = input;
     setInput('');
+    setAttachedImage(null);
     setLoading(true);
+
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+    }
 
     try {
       const response = await fetch('/api/chat', {
@@ -351,20 +415,25 @@ export default function Chat() {
       
       if (data.error) throw new Error(data.error);
 
-      setMessages(prev => [...prev, { 
+      const botMessage: ChatMessage = { 
         id: Date.now().toString(), 
         text: data.text, 
         isBot: true,
         sourcesUsed: data.sourcesUsed,
         debugTrace: data.debugTrace
-      }]);
+      };
+
+      setMessages(prev => [...prev, botMessage]);
+      speakText(data.text);
     } catch (err: any) {
       console.error(err);
-      setMessages(prev => [...prev, { 
+      const errorMessage: ChatMessage = { 
         id: Date.now().toString(), 
         text: "Lo siento, ha ocurrido un error al conectar con el asistente. Inténtalo de nuevo en unos segundos.", 
         isBot: true 
-      }]);
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      speakText(errorMessage.text);
     } finally {
       setLoading(false);
     }
@@ -804,6 +873,14 @@ export default function Chat() {
 
         {/* Barra de Acciones Superior Derecha */}
         <div className="flex items-center gap-1.5 md:gap-2">
+          <button
+            onClick={() => setAccessibilityMode(!accessibilityMode)}
+            className={`p-2 rounded-full transition-colors ${accessibilityMode ? 'bg-amber-500/20 text-amber-400' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
+            title={accessibilityMode ? "Desactivar modo voz" : "Activar modo voz (Accesibilidad)"}
+          >
+            {accessibilityMode ? <Ear size={18} /> : <EarOff size={18} />}
+          </button>
+
           {/* Botón de Acceso a Telegram */}
           <button
             onClick={handleOpenTelegram}
@@ -834,6 +911,48 @@ export default function Chat() {
         </div>
       </header>
 
+      {accessibilityMode && (
+        <div 
+          onClick={() => {
+            if (isRecording) {
+              toggleRecording();
+              // In a real app we'd wait for state to settle, but for now we trust the user will hit send or we could auto-send.
+              // To auto-send, we can call a form submission or a separate handler.
+              // We'll leave it as push-to-talk for now and let the footer button be used, or they can tap again.
+            } else {
+              toggleRecording();
+            }
+          }}
+          className={`absolute inset-0 z-40 flex flex-col items-center justify-center cursor-pointer transition-colors ${isRecording ? 'bg-red-500/95' : 'bg-[#1C1C1E]/95 backdrop-blur-xl'}`}
+          style={{ top: '64px' /* header height */ }}
+        >
+          {isRecording ? (
+            <>
+              <Mic size={100} className="text-white animate-pulse mb-8" />
+              <p className="text-white text-4xl font-bold text-center px-6">Escuchando...</p>
+              <p className="text-white/80 text-2xl text-center px-6 mt-6">Toca para detener y preparar tu mensaje</p>
+            </>
+          ) : (
+            <>
+              <Ear size={100} className="text-amber-400 mb-8" />
+              <p className="text-white text-4xl font-bold text-center px-6">Modo Voz Activado</p>
+              <p className="text-white/80 text-2xl text-center px-6 mt-6">
+                Toca cualquier parte de esta pantalla para dictar tu mensaje.
+                <br/><br/>
+                La pantalla leerá en voz alta las respuestas.
+              </p>
+              
+              <button 
+                onClick={(e) => { e.stopPropagation(); setAccessibilityMode(false); }}
+                className="mt-16 px-8 py-4 bg-white/10 rounded-full text-white font-semibold hover:bg-white/20 active:scale-95 transition-all text-xl"
+              >
+                Cerrar modo voz
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <main className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.map((msg) => {
           const sourceBadgeMap: Record<string, string> = {
@@ -856,6 +975,9 @@ export default function Chat() {
                     : 'bg-[#0A84FF] text-white rounded-tr-sm shadow-md'
                 }`}
               >
+                {msg.image && (
+                  <img src={msg.image} alt="Attachment" className="max-w-full h-auto rounded-lg mb-2" />
+                )}
                 <p className="whitespace-pre-wrap">{msg.text}</p>
               </div>
 
@@ -887,23 +1009,72 @@ export default function Chat() {
         <div ref={messagesEndRef} />
       </main>
 
-      <footer className="p-4 bg-[#1C1C1E]/80 backdrop-blur-md border-t border-white/10">
-        <form onSubmit={sendMessage} className="flex gap-2 max-w-4xl mx-auto relative">
+      <footer className="p-3 md:p-4 bg-[#1C1C1E]/80 backdrop-blur-md border-t border-white/10 flex flex-col gap-2">
+        {attachedImage && (
+          <div className="max-w-4xl mx-auto w-full flex">
+            <div className="relative inline-block">
+              <img src={attachedImage} alt="Attachment" className="h-20 w-20 object-cover rounded-xl border border-white/20" />
+              <button 
+                type="button"
+                onClick={() => setAttachedImage(null)}
+                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+        <form onSubmit={sendMessage} className="flex gap-1.5 md:gap-2 max-w-4xl mx-auto relative w-full items-center">
           <input 
-            type="text" 
-            value={input} 
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Escribe tu mensaje..." 
-            className="flex-1 pl-5 pr-14 py-4 bg-black border border-white/10 rounded-full focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/30 transition-all text-white shadow-inner-sm placeholder:text-white/40"
-            disabled={loading}
+            type="file" 
+            accept="image/*" 
+            capture="environment" 
+            className="hidden" 
+            ref={fileInputRef} 
+            onChange={handleFileChange}
+            aria-hidden="true"
           />
           <button 
-            type="submit" 
-            disabled={!input.trim() || loading}
-            className="absolute right-2 top-2 bottom-2 aspect-square flex items-center justify-center bg-white text-black rounded-full hover:bg-gray-200 disabled:opacity-50 disabled:hover:bg-white transition-all shadow-md active:scale-95 cursor-pointer"
+            type="button" 
+            onClick={() => fileInputRef.current?.click()}
+            className="p-3 bg-white/5 text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
+            title="Adjuntar imagen o tomar foto"
+            aria-label="Adjuntar imagen o tomar foto"
           >
-            <Send size={18} className="ml-0.5" />
+            <Camera size={20} />
           </button>
+
+          <div className="relative flex-1 flex">
+            <input 
+              type="text" 
+              value={input} 
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Escribe tu mensaje..." 
+              className="flex-1 pl-4 md:pl-5 pr-[84px] py-3.5 md:py-4 bg-black border border-white/10 rounded-full focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/30 transition-all text-white shadow-inner-sm placeholder:text-white/40 text-sm md:text-base"
+              disabled={loading || isRecording}
+            />
+            
+            <div className="absolute right-1.5 top-1.5 bottom-1.5 flex gap-1">
+              <button 
+                type="button"
+                onClick={toggleRecording}
+                className={`aspect-square flex items-center justify-center rounded-full transition-all cursor-pointer ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-transparent text-white/60 hover:text-white hover:bg-white/10'}`}
+                title={isRecording ? 'Detener grabación' : 'Dictar mensaje'}
+                aria-label={isRecording ? 'Detener grabación' : 'Dictar mensaje'}
+              >
+                {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
+              </button>
+              
+              <button 
+                type="submit" 
+                disabled={(!input.trim() && !attachedImage) || loading}
+                className="aspect-square flex items-center justify-center bg-white text-black rounded-full hover:bg-gray-200 disabled:opacity-50 disabled:hover:bg-white transition-all shadow-md active:scale-95 cursor-pointer"
+                aria-label="Enviar mensaje"
+              >
+                <Send size={18} className="ml-0.5" />
+              </button>
+            </div>
+          </div>
         </form>
       </footer>
     </motion.div>

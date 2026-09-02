@@ -9,6 +9,7 @@ export interface ChatMessage {
   id: string;
   text: string;
   isBot: boolean;
+  image?: string;
   sourcesUsed?: string[];
   debugTrace?: any;
   presentation?: any;
