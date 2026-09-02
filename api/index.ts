@@ -1,4 +1,4 @@
-import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService, weatherProvider } from './services/vigo';
+import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService, weatherProvider } from '../server/services/vigo';
 import { 
   vigoAgentPlanner, 
   vigoDataRegistry, 
@@ -7,7 +7,7 @@ import {
   vigoContextService,
   vigoHistoricalDataService,
   vigoTimeResolver
-} from './services/brain';
+} from '../server/services/brain';
 
 import express from "express";
 import { GoogleGenAI } from "@google/genai";

@@ -1,7 +1,7 @@
-import { vigoAgentPlanner } from '../api/services/brain/VigoAgentPlanner';
-import { vigoTimeResolver } from '../api/services/brain/VigoTimeResolver';
-import { vigoToolExecutor } from '../api/services/brain/VigoToolExecutor';
-import { ahorraAIBusinessService } from '../api/services/brain/AhorraAIBusinessService';
+import { vigoAgentPlanner } from '../server/services/brain/VigoAgentPlanner';
+import { vigoTimeResolver } from '../server/services/brain/VigoTimeResolver';
+import { vigoToolExecutor } from '../server/services/brain/VigoToolExecutor';
+import { ahorraAIBusinessService } from '../server/services/brain/AhorraAIBusinessService';
 
 const testCases = [
   { id: 1, query: "Hola, que tal. Que puedo hacer mañana en Vigo mi novia y yo?" },
