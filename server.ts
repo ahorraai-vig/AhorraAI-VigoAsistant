@@ -6,6 +6,17 @@ import app from "./api/index.js";
 async function startServer() {
   const PORT = 3000;
 
+  // Catch-all for unhandled /api/* routes to prevent them from falling through to the SPA and returning HTML
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: 'API route not found' });
+  });
+
+  // Global error handler for API routes
+  app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('API Error:', err);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

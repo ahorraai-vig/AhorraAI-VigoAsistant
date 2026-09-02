@@ -226,7 +226,7 @@ export default function AdminBusinessesList() {
               <input 
                 type="text" required
                 value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
             
@@ -236,7 +236,7 @@ export default function AdminBusinessesList() {
                 type="text"
                 value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}
                 placeholder="Ej. Hostelería, Salud y Farmacia, Deporte..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -246,7 +246,7 @@ export default function AdminBusinessesList() {
                 type="text"
                 value={formData.zone} onChange={e => setFormData({...formData, zone: e.target.value})}
                 placeholder="Ej. Casco Vello, Calvario, Príncipe..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -269,7 +269,7 @@ export default function AdminBusinessesList() {
                 type="text"
                 value={formData.access_code} onChange={e => setFormData({...formData, access_code: e.target.value})}
                 placeholder="Ej. VIGO-4432-CASCO (Dejar vacío para autogenerar)"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none font-mono text-sm uppercase"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none font-mono text-sm uppercase"
               />
             </div>
 
@@ -278,7 +278,7 @@ export default function AdminBusinessesList() {
               <textarea 
                 rows={3}
                 value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none resize-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none resize-none"
               ></textarea>
             </div>
 
@@ -287,7 +287,7 @@ export default function AdminBusinessesList() {
               <input 
                 type="text"
                 value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -296,7 +296,7 @@ export default function AdminBusinessesList() {
               <input 
                 type="text"
                 value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -305,7 +305,7 @@ export default function AdminBusinessesList() {
               <input 
                 type="url"
                 value={formData.website} onChange={e => setFormData({...formData, website: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -314,7 +314,7 @@ export default function AdminBusinessesList() {
               <input 
                 type="number" step="any"
                 value={formData.latitude} onChange={e => setFormData({...formData, latitude: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -323,7 +323,7 @@ export default function AdminBusinessesList() {
               <input 
                 type="number" step="any"
                 value={formData.longitude} onChange={e => setFormData({...formData, longitude: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -332,7 +332,7 @@ export default function AdminBusinessesList() {
               <textarea 
                 rows={2}
                 value={formData.opening_hours} onChange={e => setFormData({...formData, opening_hours: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none font-mono text-sm"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none font-mono text-sm"
               ></textarea>
             </div>
 
@@ -342,7 +342,7 @@ export default function AdminBusinessesList() {
                 type="text"
                 value={formData.cooperation_offers} onChange={e => setFormData({...formData, cooperation_offers: e.target.value})}
                 placeholder="Ej. Tapa gratis, 10% descuento"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -352,7 +352,7 @@ export default function AdminBusinessesList() {
                 type="text"
                 value={formData.cooperation_needs} onChange={e => setFormData({...formData, cooperation_needs: e.target.value})}
                 placeholder="Ej. Atraer turistas, Llenar mañanas"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -362,7 +362,7 @@ export default function AdminBusinessesList() {
                 type="text"
                 value={formData.cooperation_valleyHours} onChange={e => setFormData({...formData, cooperation_valleyHours: e.target.value})}
                 placeholder="Ej. Martes a jueves de 16:00 a 19:00"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none"
               />
             </div>
 
@@ -450,7 +450,7 @@ export default function AdminBusinessesList() {
               placeholder="Buscar por nombre, zona o dirección..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
+              className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
             />
           </div>
         </div>
