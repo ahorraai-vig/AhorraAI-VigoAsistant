@@ -1774,6 +1774,13 @@ app.post("/api/cooperation/login", async (req, res) => {
   }
 });
 
+
+/** Public payloads must never include merchant access codes. */
+function publicBusinessView(business: MemoryCoopBusiness) {
+  const { access_code: _accessCode, ...safe } = business;
+  return safe;
+}
+
 // 3. Obtener Ficha y Sinergias de un negocio por ID
 app.get("/api/cooperation/business/:id", async (req, res) => {
   const { id } = req.params;
@@ -1785,7 +1792,7 @@ app.get("/api/cooperation/business/:id", async (req, res) => {
 
   const mySynergies = inMemorySynergies.filter(s => s.businessA_id === id || s.businessB_id === id);
   res.json({
-    business,
+    business: publicBusinessView(business),
     synergies: mySynergies
   });
 });
@@ -1801,13 +1808,13 @@ app.get("/api/cooperation/all", async (req, res) => {
     }
 
     res.json({
-      businesses: allBusinesses,
+      businesses: allBusinesses.map(publicBusinessView),
       synergies: inMemorySynergies
     });
   } catch (err: any) {
     console.error("[Cooperation All Error]:", err);
     res.json({
-      businesses: inMemoryCoopBusinesses,
+      businesses: inMemoryCoopBusinesses.map(publicBusinessView),
       synergies: inMemorySynergies
     });
   }
