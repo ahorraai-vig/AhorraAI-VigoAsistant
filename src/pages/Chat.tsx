@@ -382,20 +382,24 @@ export default function Chat() {
   const renderContent = () => {
     if (step === 'welcome') {
       return (
-        <div 
-          className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 relative cursor-pointer selection:bg-transparent"
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 1 }}
+          className="min-h-screen bg-vigo-ria text-white flex flex-col items-center justify-center p-6 relative cursor-pointer selection:bg-transparent"
           onClick={() => setStep('language')}
         >
           
-          <div className="flex-1 flex items-center justify-center w-full ">
+          <div className="flex-1 flex items-center justify-center w-full z-10">
             <AnimatePresence mode="wait">
               <motion.h1
                 key={greetingIndex}
-                initial={{ opacity: 0, filter: 'blur(10px)', y: 10 }}
+                initial={{ opacity: 0, filter: 'blur(10px)', y: 20 }}
                 animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
-                exit={{ opacity: 0, filter: 'blur(10px)', y: -10 }}
+                exit={{ opacity: 0, filter: 'blur(10px)', y: -20 }}
                 transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
-                className="text-5xl md:text-7xl font-light tracking-tight text-center" style={{ fontFamily: "\'Playfair Display\', serif", fontStyle: "italic" }}
+                className="text-5xl md:text-7xl font-light tracking-tight text-center" style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic" }}
               >
                 {greetings[greetingIndex].text}
               </motion.h1>
@@ -405,14 +409,18 @@ export default function Chat() {
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ delay: 1, duration: 1 }}
-            className="pb-12 flex flex-col items-center gap-3"
+            transition={{ delay: 1.5, duration: 1 }}
+            className="pb-12 flex flex-col items-center gap-3 z-10"
           >
-            <p className="text-sm font-medium tracking-widest uppercase text-white/50 animate-pulse">
+            <motion.p 
+              animate={{ opacity: [0.4, 1, 0.4] }}
+              transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
+              className="text-xs font-semibold tracking-[0.2em] uppercase text-white/70"
+            >
               Toca para continuar
-            </p>
+            </motion.p>
           </motion.div>
-        </div>
+        </motion.div>
       );
     }
 
@@ -425,58 +433,66 @@ export default function Chat() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center relative select-none"
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.8 }}
+          className="min-h-screen bg-vigo-sireno flex flex-col p-6 font-sans text-white items-center justify-center relative select-none"
         >
-          <div className="w-full max-w-md flex-1 flex flex-col items-center justify-center ">
+          <div className="w-full max-w-md flex-1 flex flex-col items-center justify-center z-10">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentLang}
-                initial={{ opacity: 0, y: 12, filter: 'blur(6px)' }}
+                initial={{ opacity: 0, y: 15, filter: 'blur(8px)' }}
                 animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, y: -12, filter: 'blur(6px)' }}
-                transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+                exit={{ opacity: 0, y: -15, filter: 'blur(8px)' }}
+                transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
                 className="flex flex-col items-center w-full"
               >
-                <h2 className="text-2xl md:text-3xl font-light tracking-tight text-center mb-8 text-white/80">
+                <h2 className="text-2xl md:text-3xl font-light tracking-tight text-center mb-12 text-white">
                   {currentTitle}
                 </h2>
                 
                 {/* Selector de idioma con flechas laterales de navegación */}
-                <div className="flex items-center justify-center gap-2.5 sm:gap-3.5 w-full">
-                  <button
+                <div className="flex items-center justify-center gap-3 sm:gap-4 w-full">
+                  <motion.button
+                    whileHover={{ scale: 1.1, backgroundColor: "rgba(255,255,255,0.15)" }}
+                    whileTap={{ scale: 0.9 }}
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       handlePrevLang();
                     }}
                     aria-label="Idioma anterior"
-                    className="w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-90 border border-white/10 text-white/70 hover:text-white transition-all shadow-md cursor-pointer"
+                    className="w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white transition-colors shadow-lg cursor-pointer"
                   >
                     <ChevronLeft size={24} className="stroke-[2.2]" />
-                  </button>
+                  </motion.button>
 
-                  <button
+                  <motion.button
+                    whileHover={{ scale: 1.05, backgroundColor: "rgba(255,255,255,0.1)", boxShadow: "0 10px 30px -10px rgba(255,255,255,0.2)" }}
+                    whileTap={{ scale: 0.95 }}
                     type="button"
                     onClick={() => {
                       setConfig({...config, language: currentLang});
                       setStep('userType');
                     }}
-                    className="flex-1 py-4 sm:py-5 px-6 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-all text-xl font-semibold text-center shadow-lg border border-white/10 text-white tracking-wide cursor-pointer hover:border-white/20"
+                    className="flex-1 py-4 sm:py-5 px-6 rounded-3xl bg-black/40 backdrop-blur-md text-xl font-medium text-center shadow-lg border border-white/10 text-white tracking-wide cursor-pointer transition-colors"
                   >
                     {currentLang}
-                  </button>
+                  </motion.button>
 
-                  <button
+                  <motion.button
+                    whileHover={{ scale: 1.1, backgroundColor: "rgba(255,255,255,0.15)" }}
+                    whileTap={{ scale: 0.9 }}
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleNextLang();
                     }}
                     aria-label="Idioma siguiente"
-                    className="w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-90 border border-white/10 text-white/70 hover:text-white transition-all shadow-md cursor-pointer"
+                    className="w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white transition-colors shadow-lg cursor-pointer"
                   >
                     <ChevronRight size={24} className="stroke-[2.2]" />
-                  </button>
+                  </motion.button>
                 </div>
               </motion.div>
             </AnimatePresence>
@@ -488,62 +504,84 @@ export default function Chat() {
     if (step === 'userType') {
       const t = translations[config.language] || translations['Español'];
       return (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="min-h-screen bg-black flex flex-col p-6 font-sans text-white items-center justify-center relative"
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.8 }}
+          className="min-h-screen bg-vigo-caballos flex flex-col p-6 font-sans text-white items-center justify-center relative"
         >
-          <div className="w-full max-w-md flex-1 flex flex-col justify-center items-center ">
+          <div className="w-full max-w-md flex-1 flex flex-col justify-center items-center z-10">
             <motion.h2 
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1, duration: 0.8 }}
-              className="text-2xl font-light tracking-tight text-center mb-8 text-white/80"
+              transition={{ delay: 0.2, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+              className="text-3xl font-light tracking-tight text-center mb-12 text-white"
             >
               {t.userTypeTitle}
             </motion.h2>
             
             {/* 3 Burbujas orgánicas: Turista, Local, Soy un negocio */}
-            <div className="flex flex-wrap gap-4 md:gap-6 items-center justify-center max-w-sm">
+            <motion.div 
+              initial="hidden"
+              animate="visible"
+              variants={{
+                hidden: { opacity: 0 },
+                visible: { opacity: 1, transition: { staggerChildren: 0.15 } }
+              }}
+              className="flex flex-wrap gap-4 md:gap-6 items-center justify-center max-w-sm"
+            >
               <motion.button
-                animate={{ scale: [1, 1.04, 1] }}
-                transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+                variants={{
+                  hidden: { opacity: 0, y: 20 },
+                  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] } }
+                }}
+                whileHover={{ y: -5, scale: 1.05, backgroundColor: "rgba(255,255,255,0.1)", boxShadow: "0 20px 40px -10px rgba(0,0,0,0.5)" }}
+                whileTap={{ scale: 0.95 }}
                 onClick={() => {
                   setConfig({...config, userType: 'tourist'});
                   setStep('config');
                 }}
-                className="w-36 h-36 md:w-40 md:h-40 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-colors flex flex-col items-center justify-center text-lg font-medium shadow-[0_0_20px_rgba(255,255,255,0.05)] border border-white/10"
+                className="w-36 h-36 md:w-40 md:h-40 rounded-[40px] bg-black/40 backdrop-blur-xl border border-white/10 transition-colors flex flex-col items-center justify-center text-lg font-medium shadow-lg"
               >
-                <Palmtree size={28} className="mb-2 text-emerald-400 opacity-90" />
-                <span>{t.userTypeTourist}</span>
+                <Palmtree size={32} strokeWidth={1.5} className="mb-3 text-emerald-400 opacity-90" />
+                <span className="text-white/90">{t.userTypeTourist}</span>
               </motion.button>
               
               <motion.button
-                animate={{ scale: [1, 1.04, 1] }}
-                transition={{ repeat: Infinity, duration: 4, ease: "easeInOut", delay: 1.5 }}
+                variants={{
+                  hidden: { opacity: 0, y: 20 },
+                  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] } }
+                }}
+                whileHover={{ y: -5, scale: 1.05, backgroundColor: "rgba(255,255,255,0.1)", boxShadow: "0 20px 40px -10px rgba(0,0,0,0.5)" }}
+                whileTap={{ scale: 0.95 }}
                 onClick={() => {
                   setConfig({...config, userType: 'local'});
                   setStep('config');
                 }}
-                className="w-36 h-36 md:w-40 md:h-40 rounded-full bg-[#1C1C1E] hover:bg-[#2C2C2E] active:scale-[0.98] transition-colors flex flex-col items-center justify-center text-lg font-medium shadow-[0_0_20px_rgba(255,255,255,0.05)] border border-white/10"
+                className="w-36 h-36 md:w-40 md:h-40 rounded-[40px] bg-black/40 backdrop-blur-xl border border-white/10 transition-colors flex flex-col items-center justify-center text-lg font-medium shadow-lg"
               >
-                <MapPin size={28} className="mb-2 text-blue-400 opacity-90" />
-                <span>{t.userTypeLocal}</span>
+                <MapPin size={32} strokeWidth={1.5} className="mb-3 text-blue-400 opacity-90" />
+                <span className="text-white/90">{t.userTypeLocal}</span>
               </motion.button>
 
               <motion.button
-                animate={{ scale: [1, 1.05, 1] }}
-                transition={{ repeat: Infinity, duration: 4.5, ease: "easeInOut", delay: 3 }}
+                variants={{
+                  hidden: { opacity: 0, y: 20 },
+                  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] } }
+                }}
+                whileHover={{ y: -5, scale: 1.05, backgroundColor: "rgba(255,255,255,0.15)", boxShadow: "0 20px 40px -10px rgba(245, 158, 11, 0.15)" }}
+                whileTap={{ scale: 0.95 }}
                 onClick={() => {
                   setShowBusinessModal(true);
                 }}
-                className="w-36 h-36 md:w-40 md:h-40 rounded-full bg-gradient-to-b from-[#242428] to-[#1C1C1E] hover:from-[#323238] hover:to-[#242428] active:scale-[0.98] transition-all flex flex-col items-center justify-center text-center p-2 text-base font-medium shadow-[0_0_25px_rgba(234,179,8,0.1)] border border-amber-500/30"
+                className="w-36 h-36 md:w-40 md:h-40 rounded-[40px] bg-gradient-to-b from-black/60 to-black/40 backdrop-blur-xl border border-amber-500/30 transition-all flex flex-col items-center justify-center text-center p-2 text-base font-medium shadow-lg relative overflow-hidden"
               >
-                <Store size={28} className="mb-2 text-amber-400 opacity-90" />
-                <span className="leading-tight px-1">{t.userTypeBusiness}</span>
+                <div className="absolute inset-0 bg-amber-500/5 opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+                <Store size={32} strokeWidth={1.5} className="mb-3 text-amber-400 opacity-90" />
+                <span className="leading-tight px-2 text-white/90">{t.userTypeBusiness}</span>
               </motion.button>
-            </div>
+            </motion.div>
           </div>
 
           {/* Modal / Dialog para Comercios */}
@@ -608,96 +646,139 @@ export default function Chat() {
     if (step === 'config') {
       const t = translations[config.language] || translations['Español'];
       
+      const isReady = (config.userType === 'tourist' ? config.timeAvailable !== '' : true) && config.interests.length > 0;
+      
       return (
         <motion.div 
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="min-h-screen bg-black flex flex-col p-4 md:p-8 font-sans text-white"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.8 }}
+          className="min-h-screen bg-vigo-rande flex flex-col p-4 md:p-8 font-sans text-white relative"
         >
-          <div className="max-w-md w-full mx-auto flex-1 flex flex-col ">
+          <div className="max-w-md w-full mx-auto flex-1 flex flex-col z-10">
             
-            <div className="text-center mt-8 mb-10">
-              <h1 className="text-3xl font-semibold tracking-tight text-white">{t.title}</h1>
-              <p className="text-white/50 mt-1">{t.subtitle}</p>
-            </div>
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+              className="text-center mt-8 mb-10"
+            >
+              <h1 className="text-3xl md:text-4xl font-light tracking-tight text-white mb-2">{t.title}</h1>
+              <p className="text-white/60 text-sm md:text-base font-medium">{t.subtitle}</p>
+            </motion.div>
             
-            <div className="flex-1 space-y-8 mb-8 flex flex-col items-center">
+            <motion.div 
+              initial="hidden"
+              animate="visible"
+              variants={{
+                hidden: { opacity: 0 },
+                visible: { opacity: 1, transition: { staggerChildren: 0.2, delayChildren: 0.3 } }
+              }}
+              className="flex-1 space-y-6 md:space-y-8 mb-8 flex flex-col items-center w-full"
+            >
               
               {config.userType === 'tourist' && (
                 <motion.div 
-                  animate={{ scale: [1, 1.02, 1] }}
-                  transition={{ repeat: Infinity, duration: 5, ease: "easeInOut" }}
-                  className="bg-[#1C1C1E] rounded-[48px] p-8 shadow-xl w-full max-w-sm border border-white/5 flex flex-col items-center"
+                  variants={{
+                    hidden: { opacity: 0, y: 20 },
+                    visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } }
+                  }}
+                  className="bg-black/40 backdrop-blur-xl rounded-[32px] p-6 md:p-8 shadow-2xl w-full max-w-sm border border-white/10 flex flex-col items-center"
                 >
-                  <label className="block text-sm font-medium text-white/70 uppercase tracking-widest mb-6 text-center">{t.timeLabel}</label>
+                  <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.2em] mb-6 text-center">{t.timeLabel}</label>
                   <div className="flex flex-col gap-3 w-full items-center">
-                    {['Pocas horas', 'Medio día', 'Día completo'].map((time, idx) => (
-                      <motion.button 
-                        animate={{ scale: [1, 1.02, 1] }}
-                        transition={{ repeat: Infinity, duration: 3, ease: "easeInOut", delay: idx * 0.5 }}
-                        key={time}
-                        onClick={() => setConfig({...config, timeAvailable: time})}
-                        className={`w-[85%] py-4 rounded-full text-center font-medium transition-colors ${
-                          config.timeAvailable === time 
-                            ? 'bg-white text-black shadow-md' 
-                            : 'bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]'
-                        }`}
-                      >
-                        {t.times[time]}
-                      </motion.button>
-                    ))}
+                    {['Pocas horas', 'Medio día', 'Día completo'].map((time) => {
+                      const isSelected = config.timeAvailable === time;
+                      return (
+                        <motion.button 
+                          key={time}
+                          whileHover={{ scale: 1.02, backgroundColor: isSelected ? "#ffffff" : "rgba(255,255,255,0.1)" }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => setConfig({...config, timeAvailable: time})}
+                          className={`w-[90%] py-3.5 rounded-2xl text-center font-medium transition-all duration-300 ${
+                            isSelected
+                              ? 'bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)] border border-transparent' 
+                              : 'bg-transparent text-white/80 border border-white/10 hover:text-white'
+                          }`}
+                        >
+                          {t.times[time]}
+                        </motion.button>
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}
 
               <motion.div 
-                animate={{ scale: [1, 1.02, 1] }}
-                transition={{ repeat: Infinity, duration: 5, ease: "easeInOut", delay: 2.5 }}
-                className="bg-[#1C1C1E] rounded-[48px] p-8 shadow-xl w-full max-w-sm border border-white/5 flex flex-col items-center"
+                variants={{
+                  hidden: { opacity: 0, y: 20 },
+                  visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } }
+                }}
+                className="bg-black/40 backdrop-blur-xl rounded-[32px] p-6 md:p-8 shadow-2xl w-full max-w-sm border border-white/10 flex flex-col items-center"
               >
-                <label className="block text-sm font-medium text-white/70 uppercase tracking-widest mb-6 text-center">{t.interestsLabel}</label>
-                <div className="flex flex-wrap gap-3 justify-center">
+                <label className="block text-xs font-semibold text-white/50 uppercase tracking-[0.2em] mb-6 text-center">{t.interestsLabel}</label>
+                <div className="flex flex-wrap gap-2.5 justify-center">
                   {[
-                    { id: 'Comida', icon: <Utensils size={16} className="mr-2 opacity-70" /> },
-                    { id: 'Vistas', icon: <MapPin size={16} className="mr-2 opacity-70" /> },
-                    { id: 'Compras', icon: <ShoppingBag size={16} className="mr-2 opacity-70" /> },
-                    { id: 'Historia', icon: <Landmark size={16} className="mr-2 opacity-70" /> },
-                    { id: 'Playa', icon: <Palmtree size={16} className="mr-2 opacity-70" /> }
-                  ].map((interest, idx) => (
-                    <motion.button 
-                      animate={{ scale: [1, 1.03, 1] }}
-                      transition={{ repeat: Infinity, duration: 3.5, ease: "easeInOut", delay: idx * 0.3 }}
-                      key={interest.id}
-                      onClick={() => toggleInterest(interest.id)}
-                      className={`flex items-center px-5 py-3 rounded-full font-medium transition-colors ${
-                        config.interests.includes(interest.id) 
-                          ? 'bg-white text-black shadow-md' 
-                          : 'bg-[#2C2C2E] text-white hover:bg-[#3A3A3C]'
-                      }`}
-                    >
-                      {interest.icon} {t.interests[interest.id]}
-                    </motion.button>
-                  ))}
+                    { id: 'Comida', icon: <Utensils size={14} className="mr-2" /> },
+                    { id: 'Vistas', icon: <MapPin size={14} className="mr-2" /> },
+                    { id: 'Compras', icon: <ShoppingBag size={14} className="mr-2" /> },
+                    { id: 'Historia', icon: <Landmark size={14} className="mr-2" /> },
+                    { id: 'Playa', icon: <Palmtree size={14} className="mr-2" /> }
+                  ].map((interest) => {
+                    const isSelected = config.interests.includes(interest.id);
+                    return (
+                      <motion.button 
+                        key={interest.id}
+                        whileHover={{ scale: 1.05, backgroundColor: isSelected ? "#ffffff" : "rgba(255,255,255,0.1)" }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => toggleInterest(interest.id)}
+                        className={`flex items-center px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
+                          isSelected 
+                            ? 'bg-white text-black shadow-[0_0_15px_rgba(255,255,255,0.3)] border border-transparent' 
+                            : 'bg-transparent text-white/70 border border-white/10 hover:text-white'
+                        }`}
+                      >
+                        <span className={isSelected ? "opacity-100" : "opacity-70"}>{interest.icon}</span> 
+                        {t.interests[interest.id]}
+                      </motion.button>
+                    );
+                  })}
                 </div>
               </motion.div>
 
-            </div>
+            </motion.div>
 
-            <div className="mt-auto mb-4 flex flex-col gap-2">
-              <button 
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6, duration: 0.8 }}
+              className="mt-auto mb-6 flex flex-col gap-3 items-center w-full max-w-sm mx-auto"
+            >
+              <motion.button 
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                animate={isReady ? { 
+                  boxShadow: ["0px 0px 0px rgba(255,255,255,0)", "0px 0px 20px rgba(255,255,255,0.4)", "0px 0px 0px rgba(255,255,255,0)"] 
+                } : {}}
+                transition={{ repeat: isReady ? Infinity : 0, duration: 2 }}
                 onClick={startChat}
-                className="w-full flex items-center justify-center py-4 px-6 bg-white hover:bg-gray-200 active:scale-[0.98] text-black font-semibold rounded-full transition-all shadow-lg group"
+                className={`w-[90%] flex items-center justify-center py-4 px-6 font-semibold rounded-2xl transition-all duration-500 ${
+                  isReady 
+                    ? 'bg-white text-black shadow-[0_8px_30px_rgba(255,255,255,0.2)] hover:shadow-[0_8px_40px_rgba(255,255,255,0.4)]' 
+                    : 'bg-white/10 text-white/40 backdrop-blur-md border border-white/5'
+                }`}
               >
                 {t.startBtn}
-              </button>
+              </motion.button>
+              
               <button 
                 onClick={startChat}
-                className="w-full flex items-center justify-center py-4 px-6 bg-transparent hover:bg-white/5 active:scale-[0.98] text-white/60 hover:text-white font-medium rounded-full transition-all"
+                className="w-[90%] flex items-center justify-center py-3 px-6 text-sm text-white/40 hover:text-white hover:bg-white/5 rounded-xl transition-all duration-300"
               >
                 {t.skipBtn}
               </button>
-            </div>
+            </motion.div>
           </div>
         </motion.div>
       );
@@ -706,7 +787,7 @@ export default function Chat() {
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="flex flex-col h-[100dvh] bg-black font-sans text-white"
+        className="flex flex-col h-[100dvh] bg-grunge font-sans text-white"
       >
       <header className="flex items-center justify-between p-3.5 md:p-4 bg-[#1C1C1E]/90 backdrop-blur-md border-b border-white/10 shadow-sm sticky top-0 z-30">
         <div className="flex items-center space-x-2.5">

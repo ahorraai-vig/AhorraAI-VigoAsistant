@@ -11,6 +11,52 @@ html, body, #root {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
+  font-family: 'Inter', sans-serif;
+}
+
+.bg-grunge {
+  background-color: #000000;
+  background-image: url('./assets/images/bg-grunge.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+.bg-vigo-ria {
+  background-color: #000000;
+  background-image: url('./assets/images/bg-vigo-ria.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+.bg-vigo-caballos {
+  background-color: #000000;
+  background-image: url('./assets/images/bg-vigo-caballos.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+.bg-vigo-sireno {
+  background-color: #000000;
+  background-image: url('./assets/images/bg-vigo-sireno.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+.bg-vigo-rande {
+  background-color: #000000;
+  background-image: url('./assets/images/bg-vigo-rande.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 
 /* Custom dark scrollbar styling to prevent white scrollbars on Windows/Chrome */
@@ -30,4 +76,12 @@ html, body, #root {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
+}
+@keyframes slowPan {
+  0% { background-position: 50% 50%; }
+  50% { background-position: 50% 55%; }
+  100% { background-position: 50% 50%; }
+}
+.bg-vigo-ria, .bg-vigo-caballos, .bg-vigo-sireno, .bg-vigo-rande {
+  animation: slowPan 40s ease-in-out infinite;
 }
