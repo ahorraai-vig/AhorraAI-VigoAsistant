@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <circle cx="100" cy="100" r="95" fill="#1C1C1E" />
+  <!-- Letter A base -->
+  <path d="M 100 40 L 40 160 L 65 160 L 80 130 L 120 130 L 100 40 Z" fill="#FFFFFF" />
+  <polygon points="100,60 85,100 115,100" fill="#1C1C1E" />
+  <!-- Upward tech arrow integrated in the right leg -->
+  <path d="M 130 160 L 105 105 L 145 105 Z" fill="#FFFFFF" />
+  <path d="M 125 105 L 155 40 L 175 40 L 145 105 Z" fill="#FFFFFF" />
+  <!-- Circuit nodes -->
+  <circle cx="165" cy="70" r="7" fill="#FFFFFF" />
+  <circle cx="155" cy="90" r="5" fill="#FFFFFF" />
+  <circle cx="175" cy="90" r="5" fill="#FFFFFF" />
+  <path d="M 165 70 L 155 90 M 165 70 L 175 90" stroke="#FFFFFF" stroke-width="3" />
+</svg>

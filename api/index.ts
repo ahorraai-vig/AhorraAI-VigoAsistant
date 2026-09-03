@@ -289,7 +289,7 @@ const vigoTools = [{
   ]
 }];
 
-async function generateAIResponse(formattedMessages: Array<{ role: string; content: string }>, systemInstruction: string): Promise<string> {
+async function generateAIResponse(formattedMessages: Array<{ role: string; content: string; image?: string }>, systemInstruction: string): Promise<string> {
   // 1. Intentar primero con Gemini (@google/genai) probando modelos oficiales soportados en cascada
   if (ai) {
     const geminiModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
@@ -297,10 +297,23 @@ async function generateAIResponse(formattedMessages: Array<{ role: string; conte
       try {
         const response = await ai.models.generateContent({
           model,
-          contents: formattedMessages.map(m => ({
-            role: m.role === 'model' || m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }]
-          })),
+          contents: formattedMessages.map(m => {
+            const parts: any[] = [{ text: m.content || "Imagen adjunta" }];
+            if (m.image && typeof m.image === 'string' && m.image.includes(',')) {
+              const base64Data = m.image.split(',')[1];
+              const mimeType = m.image.split(';')[0].split(':')[1] || 'image/jpeg';
+              parts.push({
+                inlineData: {
+                  data: base64Data,
+                  mimeType: mimeType
+                }
+              });
+            }
+            return {
+              role: m.role === 'model' || m.role === 'assistant' ? 'model' : 'user',
+              parts
+            };
+          }),
           config: {
             systemInstruction,
           }
@@ -1122,7 +1135,8 @@ app.post("/api/chat", async (req, res) => {
     const lastMessage = messages[messages.length - 1].text;
     const formattedMessages = messages.map((m: any) => ({
       role: m.isBot ? 'model' : 'user',
-      content: m.text
+      content: m.text,
+      image: m.image
     }));
 
     // 1. Comprensión de intención y Planificación dinámica de fuentes

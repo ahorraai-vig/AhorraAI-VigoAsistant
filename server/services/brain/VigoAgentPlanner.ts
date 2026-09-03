@@ -202,7 +202,7 @@ export class VigoAgentPlanner {
    */
   async executePlan(
     plan: AgentExecutionPlan, 
-    messages: Array<{ role: string; content: string }>,
+    messages: Array<{ role: string; content: string; image?: string }>,
     config?: UserSessionConfig
   ): Promise<AgentStructuredResponse> {
     const startTime = Date.now();

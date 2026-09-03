@@ -25,7 +25,7 @@ html, body, #root {
 
 .bg-vigo-ria {
   background-color: #000000;
-  background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url('./assets/images/bg_vigo_ria_minimal_1788380796746.jpg');
+  background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url('./assets/images/bg_vigo_ria_neon_1788467313547.jpg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -34,7 +34,7 @@ html, body, #root {
 
 .bg-vigo-caballos {
   background-color: #000000;
-  background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url('./assets/images/bg_vigo_caballos_minimal_1788380809485.jpg');
+  background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url('./assets/images/bg_vigo_caballos_neon_1788467332368.jpg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -43,7 +43,7 @@ html, body, #root {
 
 .bg-vigo-sireno {
   background-color: #000000;
-  background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url('./assets/images/bg_vigo_sireno_minimal_1788380822312.jpg');
+  background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url('./assets/images/bg_vigo_sireno_neon_1788467351054.jpg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -52,7 +52,7 @@ html, body, #root {
 
 .bg-vigo-rande {
   background-color: #000000;
-  background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url('./assets/images/bg_vigo_rande_minimal_1788380835199.jpg');
+  background-image: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url('./assets/images/bg_vigo_rande_neon_1788467372662.jpg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;

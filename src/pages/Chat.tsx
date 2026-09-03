@@ -580,16 +580,7 @@ export default function Chat() {
           transition={{ duration: 0.8 }}
           className="min-h-screen bg-vigo-caballos flex flex-col p-6 font-sans text-white items-center justify-center relative"
         >
-          <div className="w-full max-w-md flex-1 flex flex-col justify-center items-center z-10">
-            <motion.h2 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-              className="text-3xl font-light tracking-tight text-center mb-12 text-white"
-            >
-              {t.userTypeTitle}
-            </motion.h2>
-            
+          <div className="w-full max-w-[1400px] flex-1 flex flex-col justify-center items-center z-10 relative">
             {/* 3 Burbujas orgánicas: Turista, Local, Soy un negocio */}
             <motion.div 
               initial="hidden"
@@ -598,12 +589,12 @@ export default function Chat() {
                 hidden: { opacity: 0 },
                 visible: { opacity: 1, transition: { staggerChildren: 0.15 } }
               }}
-              className="flex flex-wrap gap-4 md:gap-6 items-center justify-center max-w-sm"
+              className="flex justify-between items-center w-full px-4 sm:px-12 md:px-32 lg:px-48 mb-[10vh] md:mb-[15vh]"
             >
               <motion.button
                 variants={{
-                  hidden: { opacity: 0, y: 20 },
-                  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] } }
+                  hidden: { opacity: 0, x: -50 },
+                  visible: { opacity: 1, x: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } }
                 }}
                 whileHover={{ y: -5, scale: 1.05, backgroundColor: "rgba(255,255,255,0.1)", boxShadow: "0 20px 40px -10px rgba(0,0,0,0.5)" }}
                 whileTap={{ scale: 0.95 }}
@@ -611,16 +602,16 @@ export default function Chat() {
                   setConfig({...config, userType: 'tourist'});
                   setStep('config');
                 }}
-                className="w-36 h-36 md:w-40 md:h-40 rounded-[40px] bg-black/40 backdrop-blur-xl border border-white/10 transition-colors flex flex-col items-center justify-center text-lg font-medium shadow-lg"
+                className="w-32 h-32 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-[40px] bg-black/40 backdrop-blur-xl border border-white/10 transition-colors flex flex-col items-center justify-center text-sm sm:text-base md:text-lg font-medium shadow-lg"
               >
-                <Palmtree size={32} strokeWidth={1.5} className="mb-3 text-emerald-400 opacity-90" />
+                <Palmtree size={28} strokeWidth={1.5} className="mb-2 md:mb-3 text-emerald-400 opacity-90 sm:w-8 sm:h-8" />
                 <span className="text-white/90">{t.userTypeTourist}</span>
               </motion.button>
               
               <motion.button
                 variants={{
-                  hidden: { opacity: 0, y: 20 },
-                  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] } }
+                  hidden: { opacity: 0, x: 50 },
+                  visible: { opacity: 1, x: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } }
                 }}
                 whileHover={{ y: -5, scale: 1.05, backgroundColor: "rgba(255,255,255,0.1)", boxShadow: "0 20px 40px -10px rgba(0,0,0,0.5)" }}
                 whileTap={{ scale: 0.95 }}
@@ -628,26 +619,32 @@ export default function Chat() {
                   setConfig({...config, userType: 'local'});
                   setStep('config');
                 }}
-                className="w-36 h-36 md:w-40 md:h-40 rounded-[40px] bg-black/40 backdrop-blur-xl border border-white/10 transition-colors flex flex-col items-center justify-center text-lg font-medium shadow-lg"
+                className="w-32 h-32 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-[40px] bg-black/40 backdrop-blur-xl border border-white/10 transition-colors flex flex-col items-center justify-center text-sm sm:text-base md:text-lg font-medium shadow-lg"
               >
-                <MapPin size={32} strokeWidth={1.5} className="mb-3 text-blue-400 opacity-90" />
+                <MapPin size={28} strokeWidth={1.5} className="mb-2 md:mb-3 text-blue-400 opacity-90 sm:w-8 sm:h-8" />
                 <span className="text-white/90">{t.userTypeLocal}</span>
               </motion.button>
+            </motion.div>
 
+            <motion.div
+              initial="hidden"
+              animate="visible"
+              variants={{
+                hidden: { opacity: 0, y: 50 },
+                visible: { opacity: 1, y: 0, transition: { duration: 0.8, delay: 0.4, ease: [0.22, 1, 0.36, 1] } }
+              }}
+              className="absolute bottom-8 sm:bottom-12 md:bottom-16 left-0 right-0 flex justify-center w-full"
+            >
               <motion.button
-                variants={{
-                  hidden: { opacity: 0, y: 20 },
-                  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] } }
-                }}
                 whileHover={{ y: -5, scale: 1.05, backgroundColor: "rgba(255,255,255,0.15)", boxShadow: "0 20px 40px -10px rgba(245, 158, 11, 0.15)" }}
                 whileTap={{ scale: 0.95 }}
                 onClick={() => {
                   setShowBusinessModal(true);
                 }}
-                className="w-36 h-36 md:w-40 md:h-40 rounded-[40px] bg-gradient-to-b from-black/60 to-black/40 backdrop-blur-xl border border-amber-500/30 transition-all flex flex-col items-center justify-center text-center p-2 text-base font-medium shadow-lg relative overflow-hidden"
+                className="w-32 h-32 sm:w-36 sm:h-36 md:w-40 md:h-40 rounded-[40px] bg-gradient-to-b from-black/60 to-black/40 backdrop-blur-xl border border-amber-500/30 transition-all flex flex-col items-center justify-center text-center p-2 text-sm sm:text-base md:text-lg font-medium shadow-lg relative overflow-hidden"
               >
                 <div className="absolute inset-0 bg-amber-500/5 opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
-                <Store size={32} strokeWidth={1.5} className="mb-3 text-amber-400 opacity-90" />
+                <Store size={28} strokeWidth={1.5} className="mb-2 md:mb-3 text-amber-400 opacity-90 sm:w-8 sm:h-8" />
                 <span className="leading-tight px-2 text-white/90">{t.userTypeBusiness}</span>
               </motion.button>
             </motion.div>
