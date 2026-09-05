@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Business, SynergyOpportunity } from '../../types';
+import { adminFetch } from '../../lib/apiAuth';
 
 export default function AdminCooperationGraph() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
@@ -35,7 +36,7 @@ export default function AdminCooperationGraph() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/cooperation/all');
+      const res = await adminFetch('/api/cooperation/all');
       const data = await res.json();
       setBusinesses(data.businesses || []);
       setSynergies(data.synergies || []);
@@ -54,7 +55,7 @@ export default function AdminCooperationGraph() {
     setEnriching(true);
     setNotification(null);
     try {
-      const res = await fetch('/api/cooperation/enrich-database', {
+      const res = await adminFetch('/api/cooperation/enrich-database', {
         method: 'POST'
       });
       const data = await res.json();
@@ -75,7 +76,7 @@ export default function AdminCooperationGraph() {
     setCalculating(true);
     setNotification(null);
     try {
-      const res = await fetch('/api/cooperation/calculate-synergies', {
+      const res = await adminFetch('/api/cooperation/calculate-synergies', {
         method: 'POST'
       });
       const data = await res.json();

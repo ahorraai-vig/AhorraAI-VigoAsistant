@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { adminFetch } from '../../lib/apiAuth';
 import { Plus, Edit2, Trash2, MapPin, Store, CheckCircle2, XCircle, RefreshCw, Key, ShieldCheck, Tag, Search } from 'lucide-react';
 
 export default function AdminBusinessesList() {
@@ -62,7 +63,7 @@ export default function AdminBusinessesList() {
     setEnriching(true);
     setNotification(null);
     try {
-      const res = await fetch('/api/cooperation/enrich-database', {
+      const res = await adminFetch('/api/cooperation/enrich-database', {
         method: 'POST'
       });
       const data = await res.json();
