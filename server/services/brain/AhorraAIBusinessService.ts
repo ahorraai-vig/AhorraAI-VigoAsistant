@@ -1,4 +1,4 @@
-import type { RetrievedFact, BusinessVerificationTier, DataConfidence } from './types';
+import type { RetrievedFact, BusinessVerificationTier, DataConfidence } from './types.js';
 
 export interface BusinessSearchFilter {
   query?: string;

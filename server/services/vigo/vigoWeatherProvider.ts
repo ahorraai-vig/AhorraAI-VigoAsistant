@@ -1,5 +1,5 @@
-import { vigoCache } from './vigoCacheService';
-import type { VigoResponse } from './vigoMobilityService';
+import { vigoCache } from './vigoCacheService.js';
+import type { VigoResponse } from './vigoMobilityService.js';
 
 export interface WeatherCondition {
   temperatureC: number;
