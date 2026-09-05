@@ -34,6 +34,94 @@ const supabase = (supabaseUrl && supabaseServiceKey)
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null;
 
+// --- Auth helpers (P0: protect write APIs) ---
+function getBearerToken(req: express.Request): string | null {
+  const auth = req.headers.authorization;
+  if (!auth || typeof auth !== 'string') return null;
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
+}
+
+function getBusinessAccessCodeFromReq(req: express.Request): string | null {
+  const header = req.headers['x-business-access-code'];
+  if (typeof header === 'string' && header.trim()) return header.trim();
+  if (Array.isArray(header) && header[0]?.trim()) return header[0].trim();
+  const bodyCode = req.body?.access_code;
+  if (typeof bodyCode === 'string' && bodyCode.trim()) return bodyCode.trim();
+  return null;
+}
+
+async function requireAdmin(req: express.Request, res: express.Response): Promise<boolean> {
+  if (!supabase) {
+    res.status(503).json({ error: 'El servicio de autenticación no está disponible. Faltan credenciales de Supabase en el servidor.' });
+    return false;
+  }
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ error: 'Necesitas iniciar sesión como administrador.' });
+    return false;
+  }
+  const { data: userData, error } = await supabase.auth.getUser(token);
+  const user = userData?.user;
+  if (error || !user) {
+    res.status(401).json({ error: 'Sesión no válida o caducada. Vuelve a iniciar sesión.' });
+    return false;
+  }
+  let role: string | undefined = user.user_metadata?.role;
+  try {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    if (profile?.role) role = profile.role;
+  } catch (profileErr) {
+    console.warn('[requireAdmin profiles lookup]:', profileErr);
+  }
+  if (role !== 'admin') {
+    res.status(403).json({ error: 'No tienes permisos de administrador para esta acción.' });
+    return false;
+  }
+  return true;
+}
+
+async function requireBusinessByAccessCode(req: express.Request, res: express.Response, businessId: string): Promise<any | null> {
+  const code = getBusinessAccessCodeFromReq(req);
+  if (!code) {
+    res.status(401).json({ error: 'Falta la clave de acceso del comercio.' });
+    return null;
+  }
+  if (!businessId) {
+    res.status(400).json({ error: 'Falta el identificador del negocio.' });
+    return null;
+  }
+  const allBusinesses = await getAllUnifiedBusinesses();
+  const business = allBusinesses.find((b: any) => b.id === businessId);
+  if (!business) {
+    res.status(404).json({ error: 'Negocio no encontrado.' });
+    return null;
+  }
+  if ((business.access_code || '').toUpperCase() !== code.toUpperCase()) {
+    res.status(403).json({ error: 'La clave de acceso no corresponde a este comercio.' });
+    return null;
+  }
+  return business;
+}
+
+async function isAdminRequest(req: express.Request): Promise<boolean> {
+  if (!supabase) return false;
+  const token = getBearerToken(req);
+  if (!token) return false;
+  try {
+    const { data: userData, error } = await supabase.auth.getUser(token);
+    const user = userData?.user;
+    if (error || !user) return false;
+    let role: string | undefined = user.user_metadata?.role;
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    if (profile?.role) role = profile.role;
+    return role === 'admin';
+  } catch {
+    return false;
+  }
+}
+
+
 // Rutas de administración y configuración
 app.get("/api/config/status", (req, res) => {
   res.json({
@@ -765,6 +853,7 @@ function enrichPlaceToBusinessProfile(place: any, index: number): MemoryCoopBusi
 
 // Endpoint enriquecido para SerpAPI: busca con cualquier engine y devuelve tanto el RAW como los negocios enriquecidos
 app.post("/api/serpapi/search-and-enrich", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
   try {
     const { query, engine = "google_maps", enrichWithAI = true } = req.body;
     const apiKey = process.env.SERPAPI_API_KEY;
@@ -891,6 +980,7 @@ Devuelve EXCLUSIVAMENTE un JSON array con esta forma:
 
 // Importar negocios enriquecidos directamente a la Red de Sinergias y recalcular grafo
 app.post("/api/serpapi/import-cooperation", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
   try {
     const { businesses } = req.body;
     if (!Array.isArray(businesses) || businesses.length === 0) {
@@ -940,6 +1030,7 @@ app.post("/api/serpapi/import-cooperation", async (req, res) => {
 
 // Endpoint legado /api/test-serpapi para compatibilidad completa
 app.post("/api/test-serpapi", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
   try {
     const { query, engine = "google_maps" } = req.body;
     const apiKey = process.env.SERPAPI_API_KEY;
@@ -972,6 +1063,7 @@ app.post("/api/test-serpapi", async (req, res) => {
 
 // Endpoint para el Agente Prospector (AI Parser)
 app.post("/api/agent/parse-prospecting-prompt", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
   try {
     const { prompt } = req.body;
     if (!prompt) {
@@ -1678,8 +1770,9 @@ app.post("/api/cooperation/register", async (req, res) => {
       return res.status(400).json({ error: "El nombre del negocio es obligatorio" });
     }
 
-    const businessId = body.id || `biz-${Date.now()}`;
-    const accessCode = body.access_code || generateBusinessAccessCode(body.name, body.zone || body.address);
+    // Siempre mintar id y access_code en servidor; ignorar body.id / body.access_code
+    const businessId = `biz-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const accessCode = generateBusinessAccessCode(body.name, body.zone || body.address);
 
     const newBusiness: MemoryCoopBusiness = {
       id: businessId,
@@ -1708,18 +1801,13 @@ app.post("/api/cooperation/register", async (req, res) => {
       updated_at: new Date().toISOString()
     };
 
-    // Actualizar o insertar en memoria
-    const existingIndex = inMemoryCoopBusinesses.findIndex(b => b.id === businessId || b.access_code === accessCode);
-    if (existingIndex >= 0) {
-      inMemoryCoopBusinesses[existingIndex] = { ...inMemoryCoopBusinesses[existingIndex], ...newBusiness, updated_at: new Date().toISOString() };
-    } else {
-      inMemoryCoopBusinesses.unshift(newBusiness);
-    }
+    // Nunca sobrescribir una fila existente: solo insertar
+    inMemoryCoopBusinesses.unshift(newBusiness);
 
-    // Guardar en Supabase con todos los campos estructurados
+    // Guardar en Supabase con insert (no upsert)
     if (supabase) {
       try {
-        await supabase.from('businesses').upsert({
+        const { error: insertErr } = await supabase.from('businesses').insert({
           id: businessId,
           name: newBusiness.name,
           description: newBusiness.description,
@@ -1735,6 +1823,9 @@ app.post("/api/cooperation/register", async (req, res) => {
           cooperation: newBusiness.cooperation,
           is_active: true
         });
+        if (insertErr) {
+          console.warn("[Supabase Insert Warning]:", insertErr);
+        }
       } catch (sbErr) {
         console.warn("[Supabase Sync Warning]:", sbErr);
       }
@@ -1821,14 +1912,16 @@ app.get("/api/cooperation/all", async (req, res) => {
       calculateSynergiesWithAI(allBusinesses).catch(console.error);
     }
 
+    const admin = await isAdminRequest(req);
     res.json({
-      businesses: allBusinesses.map(publicBusinessView),
+      businesses: admin ? allBusinesses : allBusinesses.map(publicBusinessView),
       synergies: inMemorySynergies
     });
   } catch (err: any) {
     console.error("[Cooperation All Error]:", err);
+    const admin = await isAdminRequest(req);
     res.json({
-      businesses: inMemoryCoopBusinesses.map(publicBusinessView),
+      businesses: admin ? inMemoryCoopBusinesses : inMemoryCoopBusinesses.map(publicBusinessView),
       synergies: inMemorySynergies
     });
   }
@@ -1836,6 +1929,7 @@ app.get("/api/cooperation/all", async (req, res) => {
 
 // 5. Endpoint de Auto-Enriquecimiento masivo de todos los negocios en Supabase
 app.post("/api/cooperation/enrich-database", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
   if (!supabase) {
     return res.status(400).json({ error: "Supabase no está conectado o faltan credenciales" });
   }
@@ -1891,6 +1985,7 @@ app.post("/api/cooperation/enrich-database", async (req, res) => {
 
 // 6. Recalcular Grafo y Sinergias con el Cerebro de IA
 app.post("/api/cooperation/calculate-synergies", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
   try {
     const allBusinesses = await getAllUnifiedBusinesses();
     const calculated = await calculateSynergiesWithAI(allBusinesses);
@@ -1911,6 +2006,9 @@ app.post("/api/cooperation/update-business", async (req, res) => {
     if (!id) {
       return res.status(400).json({ error: "El ID del negocio es requerido" });
     }
+
+    const authorized = await requireBusinessByAccessCode(req, res, id);
+    if (!authorized) return;
 
     const allBusinesses = await getAllUnifiedBusinesses();
     const target = allBusinesses.find(b => b.id === id);
@@ -2001,6 +2099,9 @@ app.post("/api/cooperation/propose-synergy", async (req, res) => {
       return res.status(400).json({ error: "Faltan campos obligatorios para la propuesta de sinergia" });
     }
 
+    const authorized = await requireBusinessByAccessCode(req, res, from_business_id);
+    if (!authorized) return;
+
     const allBusinesses = await getAllUnifiedBusinesses();
     const fromBiz = allBusinesses.find(b => b.id === from_business_id);
     const toBiz = allBusinesses.find(b => b.id === to_business_id);
@@ -2059,6 +2160,12 @@ app.post("/api/cooperation/refer-business", async (req, res) => {
     if (!name || !name.trim()) {
       return res.status(400).json({ error: "El nombre del comercio recomendado es obligatorio" });
     }
+    if (!referrer_business_id) {
+      return res.status(400).json({ error: "Falta el identificador del comercio que recomienda" });
+    }
+
+    const authorized = await requireBusinessByAccessCode(req, res, referrer_business_id);
+    if (!authorized) return;
 
     const allBusinesses = await getAllUnifiedBusinesses();
     const referrer = allBusinesses.find(b => b.id === referrer_business_id);
@@ -2168,6 +2275,9 @@ app.post("/api/cooperation/refer-business", async (req, res) => {
 app.get("/api/cooperation/rewards/:businessId", async (req, res) => {
   try {
     const { businessId } = req.params;
+    const authorized = await requireBusinessByAccessCode(req, res, businessId);
+    if (!authorized) return;
+
     const allBusinesses = await getAllUnifiedBusinesses();
     const business = allBusinesses.find(b => b.id === businessId);
     if (!business) {

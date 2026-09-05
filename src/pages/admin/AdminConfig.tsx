@@ -25,6 +25,7 @@ import {
   Filter
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { adminFetch } from '../../lib/apiAuth';
 
 export default function AdminConfig() {
   const [activeTab, setActiveTab] = useState<'serpapi' | 'sql' | 'keys'>('serpapi');
@@ -68,7 +69,7 @@ export default function AdminConfig() {
     setEnrichedBusinesses([]);
     setImportMessage(null);
     try {
-      const res = await fetch('/api/serpapi/search-and-enrich', {
+      const res = await adminFetch('/api/serpapi/search-and-enrich', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -120,7 +121,7 @@ export default function AdminConfig() {
     setIsImportingCooperation(true);
     setImportMessage(null);
     try {
-      const res = await fetch('/api/serpapi/import-cooperation', {
+      const res = await adminFetch('/api/serpapi/import-cooperation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ businesses: enrichedBusinesses })

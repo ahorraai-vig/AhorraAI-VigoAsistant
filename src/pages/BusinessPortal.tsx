@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Business, SynergyOpportunity, BusinessRewardProfile } from '../types';
+import { businessFetch } from '../lib/apiAuth';
 
 export default function BusinessPortal() {
   const navigate = useNavigate();
@@ -143,9 +144,12 @@ export default function BusinessPortal() {
     }
   };
 
+  const getPortalAccessCode = () =>
+    sessionStorage.getItem('coop_access_code') || accessCode || '';
+
   const fetchRewards = async (businessId: string) => {
     try {
-      const res = await fetch(`/api/cooperation/rewards/${businessId}`);
+      const res = await businessFetch(`/api/cooperation/rewards/${businessId}`, getPortalAccessCode());
       const data = await res.json();
       if (data.rewards) {
         setRewards(data.rewards);
@@ -169,7 +173,7 @@ export default function BusinessPortal() {
     setSavingFicha(true);
 
     try {
-      const res = await fetch('/api/cooperation/update-business', {
+      const res = await businessFetch('/api/cooperation/update-business', getPortalAccessCode(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -208,7 +212,7 @@ export default function BusinessPortal() {
 
     setSubmittingProposal(true);
     try {
-      const res = await fetch('/api/cooperation/propose-synergy', {
+      const res = await businessFetch('/api/cooperation/propose-synergy', getPortalAccessCode(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -257,7 +261,7 @@ export default function BusinessPortal() {
 
     setSubmittingReferral(true);
     try {
-      const res = await fetch('/api/cooperation/refer-business', {
+      const res = await businessFetch('/api/cooperation/refer-business', getPortalAccessCode(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

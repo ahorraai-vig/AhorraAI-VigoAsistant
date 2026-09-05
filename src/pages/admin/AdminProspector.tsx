@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { adminFetch } from '../../lib/apiAuth';
 import { Send, Bot, Search, Save, AlertCircle, CheckCircle2, Target, Loader2 } from 'lucide-react';
 
 type LogEntry = {
@@ -121,7 +122,7 @@ export default function AdminProspector() {
     
     // Also save to cooperation graph
     try {
-      await fetch('/api/serpapi/import-cooperation', {
+      await adminFetch('/api/serpapi/import-cooperation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ businesses: enrichedBusinesses })
@@ -144,7 +145,7 @@ export default function AdminProspector() {
     try {
       addLog('system', "Analizando la petición...");
       
-      const parseRes = await fetch('/api/agent/parse-prospecting-prompt', {
+      const parseRes = await adminFetch('/api/agent/parse-prospecting-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: userPrompt })
@@ -167,7 +168,7 @@ export default function AdminProspector() {
         const query = parseData.tasks[i];
         addLog('system', `[${i+1}/${parseData.tasks.length}] Extrayendo y enriqueciendo: "${query}"...`);
 
-        const serpRes = await fetch('/api/serpapi/search-and-enrich', {
+        const serpRes = await adminFetch('/api/serpapi/search-and-enrich', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
