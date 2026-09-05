@@ -1,6 +1,6 @@
-import { vigoCache } from './vigoCacheService';
-import { catalogService } from './vigoCatalogService';
-import type { VigoResponse } from './vigoMobilityService';
+import { vigoCache } from './vigoCacheService.js';
+import { catalogService } from './vigoCatalogService.js';
+import type { VigoResponse } from './vigoMobilityService.js';
 
 export interface VigoEventItem {
   id?: string;

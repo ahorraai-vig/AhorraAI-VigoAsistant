@@ -1,6 +1,6 @@
-import { catalogService, eventsService, mobilityService, weatherProvider } from '../vigo';
-import { vigoHistoricalDataService } from './VigoHistoricalDataService';
-import type { DataSourceType } from './types';
+import { catalogService, eventsService, mobilityService, weatherProvider } from '../vigo/index.js';
+import { vigoHistoricalDataService } from './VigoHistoricalDataService.js';
+import type { DataSourceType } from './types.js';
 
 export interface DataSourceDescriptor {
   id: DataSourceType;

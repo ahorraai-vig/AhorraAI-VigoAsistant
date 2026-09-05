@@ -1,4 +1,4 @@
-import type { DataSourceType } from './types';
+import type { DataSourceType } from './types.js';
 
 export interface HistoricalSnapshot {
   id: string;

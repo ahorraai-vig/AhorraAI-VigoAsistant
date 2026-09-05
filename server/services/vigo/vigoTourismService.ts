@@ -1,6 +1,6 @@
-import { vigoCache } from './vigoCacheService';
-import type { VigoResponse } from './vigoMobilityService';
-import { catalogService } from './vigoCatalogService';
+import { vigoCache } from './vigoCacheService.js';
+import type { VigoResponse } from './vigoMobilityService.js';
+import { catalogService } from './vigoCatalogService.js';
 
 export interface VigoCulturalCenter {
   nombre: string;

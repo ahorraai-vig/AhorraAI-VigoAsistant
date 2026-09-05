@@ -1,6 +1,6 @@
-import { vigoToolExecutor } from './VigoToolExecutor';
-import { vigoContextService } from './VigoContextService';
-import { vigoTimeResolver } from './VigoTimeResolver';
+import { vigoToolExecutor } from './VigoToolExecutor.js';
+import { vigoContextService } from './VigoContextService.js';
+import { vigoTimeResolver } from './VigoTimeResolver.js';
 import type { 
   AgentExecutionPlan, 
   AgentStructuredResponse, 
@@ -10,7 +10,7 @@ import type {
   DataSourceType,
   ToolExecutionTrace,
   AgentDebugTrace
-} from './types';
+} from './types.js';
 
 export interface UserSessionConfig {
   language?: string;

@@ -1,8 +1,8 @@
-import { eventsService, mobilityService, catalogService, alertsService, tourismService, weatherProvider } from '../vigo';
-import { ahorraAIBusinessService } from './AhorraAIBusinessService';
-import { vigoContextService } from './VigoContextService';
-import { vigoHistoricalDataService } from './VigoHistoricalDataService';
-import type { RetrievedFact, DataSourceType } from './types';
+import { eventsService, mobilityService, catalogService, alertsService, tourismService, weatherProvider } from '../vigo/index.js';
+import { ahorraAIBusinessService } from './AhorraAIBusinessService.js';
+import { vigoContextService } from './VigoContextService.js';
+import { vigoHistoricalDataService } from './VigoHistoricalDataService.js';
+import type { RetrievedFact, DataSourceType } from './types.js';
 
 export class VigoToolExecutor {
   private serpapiSearchLocalFn: ((query: string) => Promise<any>) | null = null;

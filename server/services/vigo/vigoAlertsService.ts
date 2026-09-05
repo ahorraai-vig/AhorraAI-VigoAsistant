@@ -1,6 +1,6 @@
-import { vigoCache } from './vigoCacheService';
-import type { VigoResponse } from './vigoMobilityService';
-import { mobilityService } from './vigoMobilityService';
+import { vigoCache } from './vigoCacheService.js';
+import type { VigoResponse } from './vigoMobilityService.js';
+import { mobilityService } from './vigoMobilityService.js';
 
 export class VigoAlertsService {
   /**

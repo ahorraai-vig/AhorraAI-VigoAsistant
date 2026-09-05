@@ -1,4 +1,4 @@
-import { vigoCache } from './vigoCacheService';
+import { vigoCache } from './vigoCacheService.js';
 
 const DATA_BASE_URL = process.env.VIGO_DATA_BASE_URL || 'https://datos.vigo.org/data';
 

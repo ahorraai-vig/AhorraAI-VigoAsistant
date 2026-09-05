@@ -1,4 +1,4 @@
-import { vigoCache } from './vigoCacheService';
+import { vigoCache } from './vigoCacheService.js';
 
 const CKAN_BASE_URL = process.env.VIGO_CKAN_BASE_URL || 'https://datos-ckan.vigo.org';
 
