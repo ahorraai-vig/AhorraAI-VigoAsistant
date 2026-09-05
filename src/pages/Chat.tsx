@@ -722,7 +722,7 @@ export default function Chat() {
           transition={{ duration: 0.8 }}
           className="min-h-screen bg-vigo-rande flex flex-col p-4 md:p-8 font-sans text-white relative"
         >
-          <div className="max-w-md w-full mx-auto flex-1 flex flex-col z-10">
+          <div className="w-full max-w-[1800px] mx-auto flex-1 flex flex-col z-10 relative">
             
             <motion.div 
               initial={{ opacity: 0, y: -20 }}
@@ -741,14 +741,14 @@ export default function Chat() {
                 hidden: { opacity: 0 },
                 visible: { opacity: 1, transition: { staggerChildren: 0.2, delayChildren: 0.3 } }
               }}
-              className="flex-1 space-y-6 md:space-y-8 mb-8 flex flex-col items-center w-full"
+              className={`flex-1 w-full flex flex-col md:flex-row items-center px-2 sm:px-4 md:px-12 lg:px-20 mb-[5vh] space-y-6 md:space-y-0 ${config.userType === 'tourist' ? 'md:justify-between' : 'md:justify-center'}`}
             >
               
               {config.userType === 'tourist' && (
                 <motion.div 
                   variants={{
-                    hidden: { opacity: 0, y: 20 },
-                    visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } }
+                    hidden: { opacity: 0, x: -50 },
+                    visible: { opacity: 1, x: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } }
                   }}
                   className="bg-black/40 backdrop-blur-xl rounded-[32px] p-6 md:p-8 shadow-2xl w-full max-w-sm border border-white/10 flex flex-col items-center"
                 >
@@ -778,8 +778,8 @@ export default function Chat() {
 
               <motion.div 
                 variants={{
-                  hidden: { opacity: 0, y: 20 },
-                  visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } }
+                  hidden: { opacity: 0, x: config.userType === 'tourist' ? 50 : 0, y: config.userType === 'tourist' ? 0 : 20 },
+                  visible: { opacity: 1, x: 0, y: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } }
                 }}
                 className="bg-black/40 backdrop-blur-xl rounded-[32px] p-6 md:p-8 shadow-2xl w-full max-w-sm border border-white/10 flex flex-col items-center"
               >
