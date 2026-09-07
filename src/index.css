@@ -14,6 +14,24 @@ html, body, #root {
   font-family: 'Inter', sans-serif;
 }
 
+/* Force light color-scheme and dark text in admin area and light form controls */
+.admin-light {
+  color-scheme: light;
+  color: #0f172a;
+}
+
+.admin-light input,
+.admin-light textarea,
+.admin-light select {
+  color: #0f172a !important;
+  color-scheme: light;
+}
+
+.admin-light input::placeholder,
+.admin-light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
 .bg-grunge {
   background-color: #000000;
   background-image: url('./assets/images/bg_grunge_clean_1788471028232.jpg');

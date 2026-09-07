@@ -17,6 +17,9 @@ import AdminChats from './pages/admin/AdminChats';
 import AdminCooperationGraph from './pages/admin/AdminCooperationGraph';
 import AdminMap from './pages/admin/AdminMap';
 import AdminProspector from './pages/admin/AdminProspector';
+import AdminRoofProspecting from './pages/admin/AdminRoofProspecting';
+import ObraClimaDashboard from './pages/admin/obraclima/ObraClimaDashboard';
+import ObraClimaMiniApp from './pages/admin/obraclima/ObraClimaMiniApp';
 
 export default function App() {
   return (
@@ -26,9 +29,13 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/alta-negocio" element={<BusinessOnboarding />} />
         <Route path="/cooperacion" element={<BusinessPortal />} />
+        <Route path="/obraclima-miniapp" element={<ObraClimaMiniApp />} />
+        <Route path="/obraclima" element={<ObraClimaMiniApp />} />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminDashboard />} />
           <Route path="prospector" element={<AdminProspector />} />
+          <Route path="solar" element={<AdminRoofProspecting />} />
+          <Route path="obraclima" element={<ObraClimaDashboard />} />
           <Route path="cooperacion" element={<AdminCooperationGraph />} />
           <Route path="business" element={<AdminBusiness />} />
           <Route path="businesses" element={<AdminBusinessesList />} />

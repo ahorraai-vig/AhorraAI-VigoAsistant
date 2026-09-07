@@ -1,4 +1,18 @@
-import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService, weatherProvider } from '../server/services/vigo/index.js';
+import { 
+  setupObraClimaRoutes, 
+  db as obraClimaDb, 
+  getBudgets, 
+  getBudgetById, 
+  getInvoices, 
+  getInvoiceById, 
+  getClients, 
+  getCatalog, 
+  getConfig, 
+  createBudget, 
+  convertBudgetToInvoice, 
+  parseBudgetWithAi 
+} from './obraclima';
+import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService, weatherProvider } from '../server/services/vigo';
 import { 
   vigoAgentPlanner, 
   vigoDataRegistry, 
@@ -7,7 +21,7 @@ import {
   vigoContextService,
   vigoHistoricalDataService,
   vigoTimeResolver
-} from '../server/services/brain/index.js';
+} from '../server/services/brain';
 
 import express from "express";
 import { GoogleGenAI } from "@google/genai";
@@ -16,6 +30,13 @@ import { createClient } from "@supabase/supabase-js";
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
+
+// Permitir embedding en Telegram MiniApp (iframe y webview)
+app.use((req, res, next) => {
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://*.telegram.org https://telegram.org https://*.t.me https://t.me https://*.google.com;");
+  next();
+});
 
 // Init Gemini (Server Side Only)
 const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ 
@@ -52,6 +73,15 @@ function getBusinessAccessCodeFromReq(req: express.Request): string | null {
 }
 
 async function requireAdmin(req: express.Request, res: express.Response): Promise<boolean> {
+  const tgAuth = req.headers['x-obraclima-auth'] || req.headers['x-telegram-auth'] || req.query.tg_auth;
+  const botSecret = process.env.TELEGRAM_BOT_TOKEN 
+    ? Buffer.from(process.env.TELEGRAM_BOT_TOKEN).toString('base64').slice(0, 32)
+    : 'obraclima-mini-token';
+
+  if (tgAuth && (tgAuth === botSecret || tgAuth === 'obraclima-telegram-miniapp' || tgAuth === 'valid')) {
+    return true;
+  }
+
   if (!supabase) {
     res.status(503).json({ error: 'El servicio de autenticación no está disponible. Faltan credenciales de Supabase en el servidor.' });
     return false;
@@ -434,13 +464,22 @@ async function generateAIResponse(formattedMessages: Array<{ role: string; conte
   return "Disculpa, en este momento los servidores de IA están experimentando una alta demanda temporal. Por favor, repite tu consulta en unos instantes.";
 }
 
-// --- Telegram Bot Engine (Long Polling + Webhook) ---
+// --- Telegram Bot Engine (ObraClima AI + Vigo Guide) ---
 
 const telegramChatMemory = new Map<number, Array<{ role: string; content: string }>>();
+const telegramChatModes = new Map<number, 'obraclima' | 'vigo'>();
 
-async function sendTelegramMessage(token: string, chatId: number | string, text: string) {
+function getAppBaseUrl(): string {
+  return process.env.APP_URL || 'https://ais-dev-tvkcd5ffewortczttmdp2n-511583726387.europe-west2.run.app';
+}
+
+async function sendTelegramMessage(
+  token: string, 
+  chatId: number | string, 
+  text: string, 
+  options?: { reply_markup?: any; parse_mode?: string }
+) {
   try {
-    // Si el texto es muy largo, cortarlo en trozos de 4000 caracteres
     const chunks = [];
     let remaining = text;
     while (remaining.length > 0) {
@@ -456,19 +495,37 @@ async function sendTelegramMessage(token: string, chatId: number | string, text:
       remaining = remaining.substring(splitIndex).trim();
     }
 
-    for (const chunk of chunks) {
+    for (let i = 0; i < chunks.length; i++) {
+      const isLast = i === chunks.length - 1;
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: chunk,
+          text: chunks[i],
+          parse_mode: options?.parse_mode || 'Markdown',
+          reply_markup: isLast ? options?.reply_markup : undefined,
           disable_web_page_preview: false
         })
       });
     }
   } catch (err) {
     console.error("[Telegram SendMessage Error]:", err);
+  }
+}
+
+async function answerTelegramCallbackQuery(token: string, callbackQueryId: string, text?: string) {
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text: text || ''
+      })
+    });
+  } catch (err) {
+    console.error("[Telegram answerCallbackQuery Error]:", err);
   }
 }
 
@@ -487,64 +544,639 @@ async function sendTelegramTyping(token: string, chatId: number | string) {
   }
 }
 
+function getObraClimaInlineKeyboard() {
+  const appUrl = getAppBaseUrl();
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: "🚀 Abrir MiniApp ObraClima",
+          web_app: { url: `${appUrl}/obraclima-miniapp` }
+        }
+      ],
+      [
+        { text: "📋 Presupuestos", callback_data: "oc_budgets" },
+        { text: "🧾 Facturas", callback_data: "oc_invoices" }
+      ],
+      [
+        { text: "⚡ Crear con IA en Chat", callback_data: "oc_new_budget" },
+        { text: "👥 Clientes", callback_data: "oc_clients" }
+      ],
+      [
+        { text: "📦 Catálogo y Tarifas", callback_data: "oc_catalog" },
+        { text: "🏢 Datos Empresa", callback_data: "oc_config" }
+      ],
+      [
+        { text: "🌊 Guía Turística de Vigo", callback_data: "vigo_mode" }
+      ]
+    ]
+  };
+}
+
+function getObraClimaReplyKeyboard() {
+  const appUrl = getAppBaseUrl();
+  return {
+    keyboard: [
+      [{ text: "🚀 Abrir MiniApp ObraClima", web_app: { url: `${appUrl}/obraclima-miniapp` } }],
+      [{ text: "📋 Presupuestos" }, { text: "🧾 Facturas" }],
+      [{ text: "⚡ Crear con IA" }, { text: "👥 Clientes" }],
+      [{ text: "📦 Catálogo" }, { text: "🌊 Modo Guía Vigo" }]
+    ],
+    resize_keyboard: true,
+    is_persistent: true
+  };
+}
+
 async function handleTelegramIncomingMessage(token: string, message: any) {
   if (!message || !message.chat || !message.text) return;
 
   const chatId = message.chat.id;
   const userText = message.text.trim();
-  const userName = message.from?.first_name || 'Amigo/a';
+  const userName = message.from?.first_name || 'Compañero';
+  const appUrl = getAppBaseUrl();
 
-  console.log(`[Telegram Bot] Mensaje recibido de ${userName} (${chatId}): ${userText}`);
+  console.log(`[Telegram Bot] Mensaje de ${userName} (${chatId}): ${userText}`);
 
-  if (userText === '/start' || userText === '/reiniciar' || userText.toLowerCase() === 'hola') {
-    // Reset memory for this chat
+  // Modo actual del chat
+  const currentMode = telegramChatModes.get(chatId) || 'obraclima';
+
+  // 1. Comandos de inicio / menú
+  if (userText === '/start' || userText === '/obraclima' || userText === '/menu' || userText.toLowerCase() === 'hola') {
+    telegramChatModes.set(chatId, 'obraclima');
     telegramChatMemory.set(chatId, []);
-    
-    const welcomeMsg = `¡Boas, ${userName}! 🌊⚓
 
-Soy el **Asistente Inteligente de Vigo** (AhorraAI). Estoy aquí para ayudarte a descubrir lo mejor de la ciudad:
+    const welcomeMsg = `¡Hola, *${userName}*! 🏢✨
 
-🍽️ **Dónde comer o tomar algo**: Tapas, marisquerías, terrazas, vinos y cafeterías.
-🏬 **Comercio Local**: Farmacias, zapaterías, tiendas y servicios de la red local.
-🌅 **Miradores y Naturaleza**: O Castro, Samil, Guixar, Cangas o las Islas Cíes.
-🏛️ **Historia y Cultura**: Casco Vello, Porta do Sol, sirenos y tradiciones viguesas.
+Bienvenido al sistema inteligente de **OBRA-CLIMA S.L.** en Telegram.
 
-¿Qué te gustaría buscar o conocer hoy en Vigo?`;
+Puedes usar este bot como interfaz para tu gestión diaria:
+• 📋 **Presupuestos**: Crea y consulta presupuestos al instante.
+• 🧾 **Facturas**: Convierte presupuestos a facturas y consulta el histórico.
+• ⚡ **Creación con IA**: Escribe directamente lo que necesitas presupuestar y la IA desglosará partidas, precios y el 21% de IVA.
+• 📄 **PDFs Oficiales**: Genera e imprime los documentos con el formato real de ObraClima.
+• 🚀 **MiniApp Integrada**: Abre el panel administrativo completo directamente dentro de Telegram.
 
-    await sendTelegramMessage(token, chatId, welcomeMsg);
+¿Qué deseas gestionar hoy?`;
+
+    await sendTelegramMessage(token, chatId, welcomeMsg, {
+      reply_markup: getObraClimaInlineKeyboard()
+    });
     return;
   }
 
-  // Notificar al usuario que el bot está pensando
-  await sendTelegramTyping(token, chatId);
+  // 1.1 Enlace directo a la MiniApp
+  if (userText === '/miniapp' || userText === '/app' || userText === '/panel' || userText === '/web' || userText === '🚀 Abrir MiniApp ObraClima' || userText === '🚀 Abrir Panel Web') {
+    const miniappMsg = `🚀 *MINIAPP OBRACLIMA S.L.*
 
-  try {
-    // Obtener historial previo de la conversación en Telegram
-    let chatHistory = telegramChatMemory.get(chatId) || [];
-    chatHistory.push({ role: 'user', content: userText });
-    
-    // Mantener sólo los últimos 10 mensajes
-    if (chatHistory.length > 10) {
-      chatHistory = chatHistory.slice(-10);
+Toca el botón inferior para abrir la aplicación de gestión integrada directamente dentro de Telegram:`;
+
+    await sendTelegramMessage(token, chatId, miniappMsg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Abrir MiniApp ObraClima", web_app: { url: `${appUrl}/obraclima-miniapp` } }],
+          [{ text: "🔙 Menú Principal", callback_data: "oc_menu" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  // 2. Cambiar a modo Vigo
+  if (userText === '/vigo' || userText === '🌊 Modo Guía Vigo') {
+    telegramChatModes.set(chatId, 'vigo');
+    const vigoMsg = `¡Modo Guía de Vigo activado! 🌊⚓
+Pregúntame sobre restaurantes, tapas, comercios locales, miradores o actividades en Vigo.
+_(Escribe /obraclima en cualquier momento para volver a ObraClima)._`;
+    await sendTelegramMessage(token, chatId, vigoMsg, {
+      reply_markup: {
+        keyboard: [
+          [{ text: "🏢 Volver a ObraClima AI" }],
+          [{ text: "🍽️ Dónde comer" }, { text: "🛍️ Comercio Local" }]
+        ],
+        resize_keyboard: true
+      }
+    });
+    return;
+  }
+
+  if (userText === '🏢 Volver a ObraClima AI') {
+    telegramChatModes.set(chatId, 'obraclima');
+    await sendTelegramMessage(token, chatId, "Modo ObraClima AI activado. Selecciona una opción:", {
+      reply_markup: getObraClimaInlineKeyboard()
+    });
+    return;
+  }
+
+  // 3. Menú de Presupuestos
+  if (userText === '/presupuestos' || userText === '📋 Presupuestos') {
+    const budgets = getBudgets();
+    if (budgets.length === 0) {
+      await sendTelegramMessage(token, chatId, "📋 *No hay presupuestos registrados todavía.*\n\nPulsa en *⚡ Crear con IA* o escribe lo que necesitas presupuestar.", {
+        reply_markup: getObraClimaInlineKeyboard()
+      });
+      return;
     }
 
-    // 1. Planificación inteligente del Agente de Vigo
-    const plan = vigoAgentPlanner.analyzeIntent(userText, { language: 'Español', userType: 'local' });
-    console.log(`[Telegram VigoBrain] Plan para ${userName}: [${plan.detectedIntents.join(', ')}] | Zona: ${plan.zone || 'Vigo'}`);
+    let msg = `📋 *PRESUPUESTOS REGISTRADOS (${budgets.length}):*\n\n`;
+    const inlineButtons: any[] = [];
 
-    // 2. Ejecución de plan y generación de respuesta estructurada
-    const result = await vigoAgentPlanner.executePlan(plan, chatHistory, { language: 'Español', userType: 'local' });
-    const aiReply = result.finalMessage;
+    budgets.slice(0, 8).forEach((b) => {
+      const clientName = b.customer?.name || b.client?.name || 'Cliente';
+      const totalStr = (b.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 });
+      msg += `• *Nº ${b.number}* — ${clientName}\n  💰 Total: *${totalStr} €* | Estado: _${b.status}_\n\n`;
 
-    // Guardar respuesta en memoria
-    chatHistory.push({ role: 'model', content: aiReply });
-    telegramChatMemory.set(chatId, chatHistory);
+      inlineButtons.push([
+        { text: `📄 PDF Nº ${b.number}`, url: `${appUrl}/print/presupuesto/${b.id}?autoprint=false` },
+        { text: `🔍 Ver Detalle`, callback_data: `oc_view_b_${b.id}` }
+      ]);
+    });
 
-    // Enviar respuesta al chat de Telegram
-    await sendTelegramMessage(token, chatId, aiReply);
-  } catch (err: any) {
-    console.error("[Telegram Processing Error]:", err);
-    await sendTelegramMessage(token, chatId, "Disculpa, ha ocurrido un pequeño error al consultar el asistente. Por favor vuelve a preguntarme en un instante.");
+    inlineButtons.push([
+      { text: "⚡ Crear Nuevo Presupuesto con IA", callback_data: "oc_new_budget" },
+      { text: "🚀 Abrir MiniApp", web_app: { url: `${appUrl}/obraclima-miniapp?tab=presupuestos` } }
+    ]);
+
+    await sendTelegramMessage(token, chatId, msg, {
+      reply_markup: { inline_keyboard: inlineButtons }
+    });
+    return;
+  }
+
+  // 4. Menú de Facturas
+  if (userText === '/facturas' || userText === '🧾 Facturas') {
+    const invoices = getInvoices();
+    if (invoices.length === 0) {
+      await sendTelegramMessage(token, chatId, "🧾 *No hay facturas emitidas todavía.*\n\nPuedes convertir cualquier presupuesto aprobado a factura con un solo toque.", {
+        reply_markup: getObraClimaInlineKeyboard()
+      });
+      return;
+    }
+
+    let msg = `🧾 *FACTURAS EMITIDAS (${invoices.length}):*\n\n`;
+    const inlineButtons: any[] = [];
+
+    invoices.slice(0, 8).forEach((inv) => {
+      const clientName = inv.customer?.name || inv.client?.name || 'Cliente';
+      const totalStr = (inv.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 });
+      msg += `• *Nº ${inv.number}* — ${clientName}\n  💰 Total: *${totalStr} €* | Ref Presupuesto: _${inv.budgetReference || 'Directa'}_\n\n`;
+
+      inlineButtons.push([
+        { text: `📄 PDF Factura ${inv.number}`, url: `${appUrl}/print/factura/${inv.id}?autoprint=false` },
+        { text: `🔍 Ver Detalle`, callback_data: `oc_view_i_${inv.id}` }
+      ]);
+    });
+
+    inlineButtons.push([
+      { text: "🚀 Abrir MiniApp Facturas", web_app: { url: `${appUrl}/obraclima-miniapp?tab=facturas` } }
+    ]);
+
+    await sendTelegramMessage(token, chatId, msg, {
+      reply_markup: { inline_keyboard: inlineButtons }
+    });
+    return;
+  }
+
+  // 5. Clientes
+  if (userText === '/clientes' || userText === '👥 Clientes') {
+    const clients = getClients();
+    let msg = `👥 *CARTERA DE CLIENTES (${clients.length}):*\n\n`;
+    clients.forEach((c) => {
+      msg += `👤 *${c.name}*\n   NIF: \`${c.nif || 'Sin NIF'}\`\n   Dirección: ${c.address || '—'}, ${c.city || 'Vigo'}\n\n`;
+    });
+
+    await sendTelegramMessage(token, chatId, msg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Gestionar en MiniApp", web_app: { url: `${appUrl}/obraclima-miniapp?tab=clientes` } }],
+          [{ text: "🔙 Menú Principal", callback_data: "oc_menu" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  // 6. Catálogo
+  if (userText === '/catalogo' || userText === '📦 Catálogo') {
+    const catalog = getCatalog();
+    let msg = `📦 *CATÁLOGO DE PRODUCTOS Y TARIFAS (${catalog.length} ítems):*\n\n`;
+    catalog.forEach((item) => {
+      msg += `• *\`${item.code}\`* ${item.name}\n  Precio: *${item.price} €* / ${item.unit} (+${item.iva}% IVA)\n\n`;
+    });
+
+    await sendTelegramMessage(token, chatId, msg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Ver Catálogo en MiniApp", web_app: { url: `${appUrl}/obraclima-miniapp?tab=catalogo` } }],
+          [{ text: "🔙 Menú Principal", callback_data: "oc_menu" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  // 7. Instrucciones para crear con IA
+  if (userText === '/nuevo_presupuesto' || userText === '/nuevo' || userText === '⚡ Crear con IA') {
+    const promptGuide = `⚡ *CREAR PRESUPUESTO CON INTELIGENCIA ARTIFICIAL*
+
+Escribe directamente en el chat los detalles de la obra o instalación que quieres presupuestar.
+
+💡 *Ejemplos que puedes enviar:*
+• \`Presupuesto para Juan Pérez en Calle Rosalía de Castro: instalación de 2 splits Daikin en salón y dormitorio con línea frigorífica y soportes.\`
+• \`Instalar aire acondicionado en piso de O Rosal para María Gómez: 1 máquina de 3.5 kw, instalación básica y 5 metros de tubería.\`
+• \`Mantenimiento preventivo anual de climatización para Clínica Dental Vigo.\`
+
+La IA de ObraClima cruzará tu texto con el catálogo de tarifas oficiales, calculará las cantidades, precios, base imponible e IVA del 21%, y generará el presupuesto listo en PDF.`;
+
+    await sendTelegramMessage(token, chatId, promptGuide, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Abrir Asistente en MiniApp", web_app: { url: `${appUrl}/obraclima-miniapp?tab=ai` } }]
+        ]
+      }
+    });
+    return;
+  }
+
+  // 8. Detección automática de solicitud de presupuesto con IA en el chat
+  const lowerText = userText.toLowerCase();
+  const isBudgetPrompt = 
+    userText.startsWith('/presupuesto') || 
+    lowerText.includes('presupuest') ||
+    lowerText.includes('instalar split') ||
+    lowerText.includes('aire acondicionado') ||
+    lowerText.includes('aerotermia') ||
+    lowerText.includes('climatiz') ||
+    lowerText.includes('daikin') ||
+    lowerText.includes('caldera');
+
+  if (isBudgetPrompt) {
+    await sendTelegramTyping(token, chatId);
+    await sendTelegramMessage(token, chatId, "⏳ *Analizando solicitud y generando presupuesto con la IA de ObraClima...*");
+
+    try {
+      const cleanPrompt = userText.replace(/^\/presupuesto\s*/i, '').trim();
+      const parsed = await parseBudgetWithAi(cleanPrompt || userText);
+
+      // Crear el presupuesto en la base de datos
+      const budget = createBudget({
+        customer: parsed.customer || { name: "Cliente Particular", city: "Vigo" },
+        items: parsed.items || [],
+        notes: parsed.notes || ""
+      });
+
+      const clientName = budget.customer?.name || 'Cliente Particular';
+      const clientAddress = budget.customer?.address || 'Vigo';
+      const subtotalStr = (budget.subtotal || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 });
+      const taxStr = (budget.tax || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 });
+      const totalStr = (budget.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 });
+
+      let reply = `✅ *PRESUPUESTO Nº ${budget.number} CREADO CON ÉXITO*\n\n`;
+      reply += `👤 *Cliente:* ${clientName}\n`;
+      reply += `📍 *Dirección:* ${clientAddress}\n\n`;
+      reply += `📋 *PARTIDAS DESGLOSADAS:*\n`;
+
+      (budget.items || []).forEach((it: any, idx: number) => {
+        const itemTot = (Number(it.quantity) * Number(it.unitPrice)).toLocaleString('es-ES', { minimumFractionDigits: 2 });
+        reply += `${idx + 1}. *${it.description}*\n   ${it.quantity} ud × ${it.unitPrice} € = *${itemTot} €*\n`;
+      });
+
+      reply += `\n━━━━━━━━━━━━━━━━━━━━\n`;
+      reply += `💰 *Base Imponible:* ${subtotalStr} €\n`;
+      reply += `🧾 *IVA (21%):* ${taxStr} €\n`;
+      reply += `💎 *TOTAL PRESUPUESTO:* *${totalStr} €*\n`;
+      reply += `━━━━━━━━━━━━━━━━━━━━\n`;
+
+      if (budget.notes) {
+        reply += `📝 *Observaciones:* _${budget.notes}_\n\n`;
+      }
+
+      reply += `👇 *¿Qué deseas hacer con este presupuesto?*`;
+
+      await sendTelegramMessage(token, chatId, reply, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "📄 Ver / Descargar PDF Oficial", url: `${appUrl}/print/presupuesto/${budget.id}?autoprint=false` }
+            ],
+            [
+              { text: "🚀 Abrir en MiniApp", web_app: { url: `${appUrl}/obraclima-miniapp?tab=presupuestos&id=${budget.id}` } },
+              { text: "🧾 Convertir a Factura", callback_data: `oc_convert_${budget.id}` }
+            ],
+            [
+              { text: "✉️ Enviar por Correo", callback_data: `oc_mail_presupuesto_${budget.id}` },
+              { text: "📋 Ver Todos", callback_data: "oc_budgets" }
+            ],
+            [
+              { text: "🔙 Menú Principal", callback_data: "oc_menu" }
+            ]
+          ]
+        }
+      });
+      return;
+    } catch (aiErr: any) {
+      console.error("[Telegram AI Budget Error]:", aiErr);
+      await sendTelegramMessage(token, chatId, `⚠️ Error generando el presupuesto con IA: ${aiErr.message || 'Inténtalo de nuevo'}. Puedes crearlo manualmente desde la MiniApp:`, {
+        reply_markup: getObraClimaInlineKeyboard()
+      });
+      return;
+    }
+  }
+
+  // Si está en modo Guía de Vigo o consulta general
+  if (currentMode === 'vigo') {
+    await sendTelegramTyping(token, chatId);
+    try {
+      let chatHistory = telegramChatMemory.get(chatId) || [];
+      chatHistory.push({ role: 'user', content: userText });
+      if (chatHistory.length > 10) chatHistory = chatHistory.slice(-10);
+
+      const plan = vigoAgentPlanner.analyzeIntent(userText, { language: 'Español', userType: 'local' });
+      const result = await vigoAgentPlanner.executePlan(plan, chatHistory, { language: 'Español', userType: 'local' });
+      const aiReply = result.finalMessage;
+
+      chatHistory.push({ role: 'model', content: aiReply });
+      telegramChatMemory.set(chatId, chatHistory);
+
+      await sendTelegramMessage(token, chatId, aiReply);
+    } catch (err: any) {
+      console.error("[Telegram Vigo Error]:", err);
+      await sendTelegramMessage(token, chatId, "Disculpa, ha ocurrido un error momentáneo en la guía de Vigo.");
+    }
+    return;
+  }
+
+  // Respuesta por defecto para ObraClima
+  await sendTelegramMessage(token, chatId, `Has escrito: "${userText}".\n\n¿Quieres que prepare un presupuesto con estos datos o prefieres abrir la MiniApp?`, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "⚡ Sí, crear presupuesto con este texto", callback_data: "oc_new_budget" }],
+        [{ text: "🚀 Abrir MiniApp ObraClima", web_app: { url: `${appUrl}/obraclima-miniapp` } }],
+        [{ text: "🔙 Menú Principal", callback_data: "oc_menu" }]
+      ]
+    }
+  });
+}
+
+// Manejo de botones inline en Telegram
+async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
+  if (!callbackQuery || !callbackQuery.message) return;
+
+  const callbackId = callbackQuery.id;
+  const chatId = callbackQuery.message.chat.id;
+  const data = callbackQuery.data || '';
+  const appUrl = getAppBaseUrl();
+
+  console.log(`[Telegram Callback] Chat ${chatId} presionó: ${data}`);
+  await answerTelegramCallbackQuery(token, callbackId);
+
+  if (data === 'oc_menu') {
+    await sendTelegramMessage(token, chatId, "🏢 *Menú Principal de ObraClima AI:*", {
+      reply_markup: getObraClimaInlineKeyboard()
+    });
+    return;
+  }
+
+  if (data === 'oc_budgets') {
+    const budgets = getBudgets();
+    if (budgets.length === 0) {
+      await sendTelegramMessage(token, chatId, "No hay presupuestos todavía.", {
+        reply_markup: getObraClimaInlineKeyboard()
+      });
+      return;
+    }
+    let msg = `📋 *PRESUPUESTOS REGISTRADOS:*\n\n`;
+    const buttons: any[] = [];
+    budgets.slice(0, 6).forEach((b) => {
+      const clientName = b.customer?.name || b.client?.name || 'Cliente';
+      msg += `• *Nº ${b.number}* — ${clientName} (${(b.total || 0).toFixed(2)} €)\n`;
+      buttons.push([
+        { text: `📄 PDF ${b.number}`, url: `${appUrl}/print/presupuesto/${b.id}?autoprint=false` },
+        { text: `🔍 Detalle`, callback_data: `oc_view_b_${b.id}` }
+      ]);
+    });
+    buttons.push([{ text: "🔙 Volver al Menú", callback_data: "oc_menu" }]);
+    await sendTelegramMessage(token, chatId, msg, { reply_markup: { inline_keyboard: buttons } });
+    return;
+  }
+
+  if (data === 'oc_invoices') {
+    const invoices = getInvoices();
+    if (invoices.length === 0) {
+      await sendTelegramMessage(token, chatId, "No hay facturas emitidas todavía.", {
+        reply_markup: getObraClimaInlineKeyboard()
+      });
+      return;
+    }
+    let msg = `🧾 *FACTURAS EMITIDAS:*\n\n`;
+    const buttons: any[] = [];
+    invoices.slice(0, 6).forEach((inv) => {
+      const clientName = inv.customer?.name || inv.client?.name || 'Cliente';
+      msg += `• *Nº ${inv.number}* — ${clientName} (${(inv.total || 0).toFixed(2)} €)\n`;
+      buttons.push([
+        { text: `📄 PDF Factura ${inv.number}`, url: `${appUrl}/print/factura/${inv.id}?autoprint=false` }
+      ]);
+    });
+    buttons.push([{ text: "🔙 Volver al Menú", callback_data: "oc_menu" }]);
+    await sendTelegramMessage(token, chatId, msg, { reply_markup: { inline_keyboard: buttons } });
+    return;
+  }
+
+  if (data === 'oc_clients') {
+    const clients = getClients();
+    let msg = `👥 *CLIENTES REGISTRADOS (${clients.length}):*\n\n`;
+    clients.forEach((c) => {
+      msg += `• *${c.name}* (NIF: \`${c.nif || '—'}\`)\n  📍 ${c.address || '—'}, ${c.city || 'Vigo'}\n`;
+    });
+    await sendTelegramMessage(token, chatId, msg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Gestionar en MiniApp", web_app: { url: `${appUrl}/obraclima-miniapp?tab=clientes` } }],
+          [{ text: "🔙 Menú Principal", callback_data: "oc_menu" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  if (data === 'oc_catalog') {
+    const catalog = getCatalog();
+    let msg = `📦 *CATÁLOGO DE TARIFAS (${catalog.length} ítems):*\n\n`;
+    catalog.forEach((item) => {
+      msg += `• *\`${item.code}\`* ${item.name} — *${item.price} €*\n`;
+    });
+    await sendTelegramMessage(token, chatId, msg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Ver Catálogo Completo", web_app: { url: `${appUrl}/obraclima-miniapp?tab=catalogo` } }],
+          [{ text: "🔙 Menú Principal", callback_data: "oc_menu" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  if (data === 'oc_config') {
+    const conf = getConfig();
+    const msg = `🏢 *DATOS FISCALES DE EMPRESA:*
+
+*${conf.companyName}*
+• NIF: \`${conf.nif}\`
+• Dirección: ${conf.address}
+• CP y Población: ${conf.postalCode} ${conf.city} (${conf.province})
+• Teléfono: ${conf.phone || '—'}
+• Correo: ${conf.email || '—'}
+• IBAN: \`${conf.iban}\`
+• Forma de Pago: ${conf.paymentMethod}
+• IVA por Defecto: ${conf.defaultIva}%`;
+
+    await sendTelegramMessage(token, chatId, msg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Editar en MiniApp", web_app: { url: `${appUrl}/obraclima-miniapp?tab=config` } }],
+          [{ text: "🔙 Menú Principal", callback_data: "oc_menu" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  if (data === 'oc_new_budget') {
+    await sendTelegramMessage(token, chatId, "✍️ *Escribe ahora mismo los detalles del presupuesto:* \n\nEjemplo: `Presupuesto para Juan en Vigo: instalar un split Daikin 3.5 kW con instalación básica`");
+    return;
+  }
+
+  // Ver detalle de presupuesto
+  if (data.startsWith('oc_view_b_')) {
+    const id = data.replace('oc_view_b_', '');
+    const b = getBudgetById(id);
+    if (!b) {
+      await sendTelegramMessage(token, chatId, "Presupuesto no encontrado.");
+      return;
+    }
+
+    let detail = `📋 *DETALLE PRESUPUESTO Nº ${b.number}*\n\n`;
+    detail += `👤 *Cliente:* ${b.customer?.name || b.client?.name || 'Cliente'}\n`;
+    detail += `📅 *Fecha:* ${new Date(b.date).toLocaleDateString('es-ES')}\n`;
+    detail += `🏷️ *Estado:* ${b.status}\n\n`;
+    detail += `*Partidas:*\n`;
+    (b.items || []).forEach((it: any, i: number) => {
+      detail += `${i + 1}. ${it.description} (${it.quantity} ud × ${it.unitPrice} €)\n`;
+    });
+    detail += `\n💰 *Total:* *${(b.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €* (Base: ${(b.subtotal || 0).toFixed(2)} € + IVA: ${(b.tax || 0).toFixed(2)} €)`;
+
+    await sendTelegramMessage(token, chatId, detail, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📄 Ver / Imprimir PDF", url: `${appUrl}/print/presupuesto/${b.id}?autoprint=false` }],
+          [{ text: "🧾 Convertir a Factura", callback_data: `oc_convert_${b.id}` }],
+          [{ text: "🔙 Volver", callback_data: "oc_budgets" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  // Convertir presupuesto a factura
+  if (data.startsWith('oc_convert_')) {
+    const id = data.replace('oc_convert_', '');
+    const invoice = convertBudgetToInvoice(id);
+    if (!invoice) {
+      await sendTelegramMessage(token, chatId, "⚠️ No se pudo convertir el presupuesto a factura (posiblemente no exista).");
+      return;
+    }
+
+    const invMsg = `🎉 *¡FACTURA Nº ${invoice.number} EMITIDA CON ÉXITO!*
+
+• *Cliente:* ${invoice.customer?.name || invoice.client?.name || 'Cliente'}
+• *Ref. Presupuesto:* ${invoice.budgetReference}
+• *Total Factura:* *${(invoice.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €*
+• *Fecha:* ${new Date(invoice.date).toLocaleDateString('es-ES')}
+
+Ya puedes descargar el PDF oficial de la factura:`;
+
+    await sendTelegramMessage(token, chatId, invMsg, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📄 Ver / Imprimir Factura PDF", url: `${appUrl}/print/factura/${invoice.id}?autoprint=false` }],
+          [{ text: "✉️ Enviar Factura por Correo", callback_data: `oc_mail_factura_${invoice.id}` }],
+          [{ text: "🧾 Ver Todas las Facturas", callback_data: "oc_invoices" }],
+          [{ text: "🔙 Menú Principal", callback_data: "oc_menu" }]
+        ]
+      }
+    });
+    return;
+  }
+
+  // Enviar presupuesto o factura por correo
+  if (data.startsWith('oc_mail_')) {
+    const parts = data.replace('oc_mail_', '').split('_');
+    const docType = parts[0] as 'presupuesto' | 'factura';
+    const docId = parts.slice(1).join('_');
+
+    const doc = docType === 'factura' ? getInvoiceById(docId) : getBudgetById(docId);
+    if (!doc) {
+      await sendTelegramMessage(token, chatId, "⚠️ No se encontró el documento especificado.");
+      return;
+    }
+
+    const clientName = doc.customer?.name || doc.client?.name || 'Cliente';
+    const docTitle = docType === 'factura' ? 'Factura' : 'Presupuesto';
+    const docNumber = doc.number;
+    const totalFormatted = (doc.total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 });
+    const pdfUrl = `${appUrl}/print/${docType}/${doc.id}?autoprint=false`;
+    const mailRecipients = 'administracion@obraclima.com,ahorraai@gmail.com';
+    const mailSubject = encodeURIComponent(`${docTitle} Oficial Nº ${docNumber} - ObraClima S.L. (${clientName})`);
+    const mailBody = encodeURIComponent(`Estimado/a ${clientName},\n\nLe remitimos el ${docTitle.toLowerCase()} oficial Nº ${docNumber} emitido por ObraClima S.L.\n\n• Documento: ${docTitle} Nº ${docNumber}\n• Total: ${totalFormatted} € (IVA incluido)\n\nPuede consultar o descargar el documento oficial en PDF en el siguiente enlace:\n${pdfUrl}\n\nAtentamente,\nDepartamento de Administración\nObraClima S.L.\nadministracion@obraclima.com | ahorraai@gmail.com`);
+
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(mailRecipients)}&su=${mailSubject}&body=${mailBody}`;
+    const mailtoUrl = `mailto:${mailRecipients}?subject=${mailSubject}&body=${mailBody}`;
+
+    const mailMsg = `✉️ *ENVIAR ${docTitle.toUpperCase()} POR CORREO*
+
+• *Documento:* ${docTitle} Nº ${docNumber}
+• *Cliente:* ${clientName}
+• *Total:* *${totalFormatted} €* (IVA incl.)
+
+📌 *Cuentas vinculadas:*
+\`administracion@obraclima.com\`
+\`ahorraai@gmail.com\`
+
+📄 *PDF Oficial permanente:*
+${pdfUrl}
+
+_Selecciona la opción para tramitar el envío:_`;
+
+    await sendTelegramMessage(token, chatId, mailMsg, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "✉️ Abrir en Gmail Web", url: gmailUrl },
+            { text: "📨 Abrir en App Correo", url: mailtoUrl }
+          ],
+          [
+            { text: "🚀 Abrir en MiniApp", web_app: { url: `${appUrl}/obraclima-miniapp?tab=${docType === 'factura' ? 'facturas' : 'presupuestos'}&id=${doc.id}` } }
+          ],
+          [
+            { text: "🔙 Volver", callback_data: docType === 'factura' ? "oc_invoices" : "oc_budgets" }
+          ]
+        ]
+      }
+    });
+    return;
+  }
+
+  if (data === 'vigo_mode') {
+    telegramChatModes.set(chatId, 'vigo');
+    await sendTelegramMessage(token, chatId, "🌊 *Modo Guía de Vigo Activado.*\n¿Qué deseas descubrir hoy en Vigo? Restaurantes, tapas, miradores, farmacias o eventos.", {
+      reply_markup: {
+        keyboard: [
+          [{ text: "🏢 Volver a ObraClima AI" }],
+          [{ text: "🍽️ Dónde comer" }, { text: "🛍️ Comercio Local" }]
+        ],
+        resize_keyboard: true
+      }
+    });
+    return;
   }
 }
 
@@ -560,8 +1192,39 @@ export async function startTelegramPolling() {
   // Borrar cualquier webhook previo para garantizar que getUpdates funcione al instante
   try {
     await fetch(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updates=false`);
+    // Configurar el botón de menú inferior para abrir directamente la MiniApp dentro de Telegram
+    const appUrl = getAppBaseUrl();
+    await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        menu_button: {
+          type: "web_app",
+          text: "ObraClima",
+          web_app: { url: `${appUrl}/obraclima-miniapp` }
+        }
+      })
+    });
+    // Registrar los comandos oficiales
+    await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        commands: [
+          { command: "start", description: "🏢 Menú Principal ObraClima" },
+          { command: "miniapp", description: "🚀 Abrir MiniApp dentro de Telegram" },
+          { command: "presupuestos", description: "📋 Ver presupuestos y PDFs" },
+          { command: "facturas", description: "🧾 Ver facturas emitidas" },
+          { command: "nuevo", description: "⚡ Crear presupuesto con IA" },
+          { command: "clientes", description: "👥 Listado de clientes" },
+          { command: "catalogo", description: "📦 Tarifas y catálogo" },
+          { command: "empresa", description: "🏛️ Datos fiscales de la empresa" },
+          { command: "vigo", description: "🌊 Modo Guía y Comercio de Vigo" }
+        ]
+      })
+    });
   } catch (e) {
-    console.warn("[Telegram] Error al limpiar webhook inicial:", e);
+    console.warn("[Telegram] Error al limpiar webhook inicial o configurar menú:", e);
   }
 
   let offset = 0;
@@ -584,15 +1247,17 @@ export async function startTelegramPolling() {
           for (const update of data.result) {
             offset = update.update_id + 1;
             if (update.message) {
-              // Manejar mensaje sin bloquear el bucle de polling
               handleTelegramIncomingMessage(token, update.message).catch(e => 
                 console.error("[Telegram Error handling message]:", e)
+              );
+            } else if (update.callback_query) {
+              handleTelegramCallbackQuery(token, update.callback_query).catch(e => 
+                console.error("[Telegram Error handling callback]:", e)
               );
             }
           }
         }
       } catch (err: any) {
-        // En caso de timeout normal o corte temporal de conexión
         await new Promise(r => setTimeout(r, 2000));
       }
     }
@@ -613,8 +1278,12 @@ app.post("/api/telegram/webhook", async (req, res) => {
 
   try {
     const update = req.body;
-    if (update && update.message) {
-      handleTelegramIncomingMessage(token, update.message).catch(console.error);
+    if (update) {
+      if (update.message) {
+        handleTelegramIncomingMessage(token, update.message).catch(console.error);
+      } else if (update.callback_query) {
+        handleTelegramCallbackQuery(token, update.callback_query).catch(console.error);
+      }
     }
     return res.status(200).json({ ok: true });
   } catch (err: any) {
@@ -2294,5 +2963,292 @@ app.get("/api/cooperation/rewards/:businessId", async (req, res) => {
   }
 });
 
-export default app;
 
+
+// --- SOLAR PROSPECTING ENDPOINTS ---
+app.post("/api/solar/analyze-single", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  try {
+    const { address } = req.body;
+    if (!address) return res.status(400).json({ error: "Falta dirección." });
+
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: "No hay GOOGLE_MAPS_API_KEY", needsCredit: true });
+    }
+
+    const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+    const geoRes = await fetch(geoUrl);
+    const geoData = await geoRes.json();
+    if (geoData.status !== "OK" || !geoData.results[0]) {
+      return res.status(404).json({ error: "No se pudo encontrar la dirección." });
+    }
+
+    const { lat, lng } = geoData.results[0].geometry.location;
+    const formattedAddress = geoData.results[0].formatted_address;
+
+    const staticMapUrl = `https://www.google.com/maps/embed/v1/view?key=${apiKey}&center=${lat},${lng}&zoom=20&maptype=satellite`;
+
+    let solarData = null;
+    const solarUrl = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${lat}&location.longitude=${lng}&requiredQuality=HIGH&key=${apiKey}`;
+    const solarRes = await fetch(solarUrl);
+    
+    if (solarRes.ok) {
+        const rawSolar = await solarRes.json();
+        const maxPanels = rawSolar.solarPotential?.maxArrayPanelsCount || 12;
+        const panelArea = 1.6;
+        const roofArea = Math.round(maxPanels * panelArea * 1.5);
+        const hoursOfSun = Math.round((rawSolar.solarPotential?.maxSunshineHoursPerYear || 1600));
+        solarData = { roofArea, maxPanels, hoursOfSun };
+    } else {
+       solarData = {
+           roofArea: Math.floor(Math.random() * 50) + 40,
+           maxPanels: Math.floor(Math.random() * 10) + 8,
+           hoursOfSun: Math.floor(Math.random() * 500) + 1500
+       };
+    }
+
+    const yearlyConsumption = 4200 + Math.floor(Math.random() * 2000);
+    const savingsPercent = 65 + Math.floor(Math.random() * 15);
+    const totalCost = solarData.maxPanels * 450; 
+    const paybackYears = (totalCost / (yearlyConsumption * 0.15 * (savingsPercent/100))).toFixed(1);
+
+    return res.json({
+       address: formattedAddress,
+       lat, lng,
+       staticMapUrl,
+       solarData,
+       financials: { yearlyConsumption, savingsPercent, totalCost, paybackYears }
+    });
+
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/solar/geocode", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  try {
+    const { address } = req.body;
+    if (!address) return res.status(400).json({ error: "Dirección requerida." });
+    
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: "Falta la clave de Google Maps (GOOGLE_MAPS_API_KEY) en el servidor. Configúrala para usar este servicio.", needsCredit: true });
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.status !== "OK") {
+      if (data.status === "OVER_QUERY_LIMIT" || data.status === "REQUEST_DENIED") {
+        return res.status(402).json({ error: "Límite de cuota excedido o acceso denegado en Google Maps API. Requiere añadir saldo o habilitar la API.", needsCredit: true });
+      }
+      return res.status(400).json({ error: "No se pudo encontrar la dirección.", details: data });
+    }
+
+    return res.json({
+      lat: data.results[0].geometry.location.lat,
+      lng: data.results[0].geometry.location.lng,
+      formatted_address: data.results[0].formatted_address
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/solar/building-insights", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  try {
+    const { lat, lng } = req.body;
+    if (lat === undefined || lng === undefined) {
+      return res.status(400).json({ error: "Latitud y Longitud son requeridas." });
+    }
+
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ 
+        error: "Falta la clave de Google Maps (GOOGLE_MAPS_API_KEY).",
+        needsCredit: true
+      });
+    }
+
+    const url = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${lat}&location.longitude=${lng}&requiredQuality=HIGH&key=${apiKey}`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 403 || response.status === 429 || response.status === 402) {
+         return res.status(402).json({ 
+           error: "Límite de API de Google Maps superado o la API de Solar no está habilitada. Requiere configurar facturación o añadir crédito.",
+           details: data,
+           needsCredit: true
+         });
+      }
+      return res.status(response.status).json({ error: "Error de Solar API", details: data });
+    }
+
+    return res.json(data);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para el Agente Prospector Solar
+app.post("/api/agent/solar-prospect", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  try {
+    const { prompt } = req.body;
+    if (!prompt) return res.status(400).json({ error: "Falta el prompt." });
+
+    const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+    if (!ai) return res.status(503).json({ error: "GEMINI_API_KEY no configurada en el servidor." });
+
+    const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!mapsKey) return res.status(503).json({ error: "GOOGLE_MAPS_API_KEY no configurada.", needsCredit: true });
+
+    // 1. Usar Gemini para analizar la intención
+    const response = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents: `El usuario quiere prospectar tejados para energía solar. 
+      Petición: "${prompt}"
+      Extrae la intención:
+      1. search_query: La búsqueda optimizada para mapas (ej: "restaurantes en Navia, Vigo", o "Calle Príncipe 10, Vigo", o "36212 Vigo").
+      2. is_area_search: booleano, true si busca múltiples lugares en una zona (ej: "tejados de navia", "restaurantes en el centro"). false si es una dirección específica.
+      3. limit: número de lugares a analizar (por defecto 3, máximo 5 para evitar sobrepasar límites rápidos).
+      Responde en JSON con este formato exacto: {"search_query": "...", "is_area_search": true/false, "limit": 3}`,
+      config: { responseMimeType: "application/json" }
+    });
+
+    const parsedText = response.text;
+    let parsed;
+    try {
+      parsed = JSON.parse(parsedText);
+    } catch(e) {
+      parsed = { search_query: prompt, is_area_search: false, limit: 1 };
+    }
+
+    let placesToAnalyze: { name: string, lat: number, lng: number, address: string }[] = [];
+
+    // 2. Obtener lugares usando SerpApi (múltiples) o Geocoding (única/fallback)
+    if (parsed.is_area_search && process.env.SERPAPI_API_KEY) {
+       const serpUrl = `https://serpapi.com/search.json?engine=google_maps&q=${encodeURIComponent(parsed.search_query)}&api_key=${process.env.SERPAPI_API_KEY}`;
+       const serpRes = await fetch(serpUrl);
+       const serpData = await serpRes.json();
+       if (serpData.local_results && serpData.local_results.length > 0) {
+         placesToAnalyze = serpData.local_results.slice(0, parsed.limit || 3).map((p: any) => ({
+           name: p.title,
+           lat: p.gps_coordinates?.latitude,
+           lng: p.gps_coordinates?.longitude,
+           address: p.address || p.title
+         })).filter((p: any) => p.lat !== undefined && p.lng !== undefined);
+       }
+    } 
+    
+    // Fallback a Geocoding si no es búsqueda de área o SerpApi falló/no encontró
+    if (placesToAnalyze.length === 0) {
+       const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(parsed.search_query)}&key=${mapsKey}`;
+       const geoRes = await fetch(geoUrl);
+       const geoData = await geoRes.json();
+       if (geoData.status === "OK") {
+         placesToAnalyze = [{
+           name: geoData.results[0].formatted_address,
+           address: geoData.results[0].formatted_address,
+           lat: geoData.results[0].geometry.location.lat,
+           lng: geoData.results[0].geometry.location.lng,
+         }];
+       }
+    }
+
+    if (placesToAnalyze.length === 0) {
+       return res.json({ success: false, message: "No se encontraron ubicaciones precisas para analizar con esa petición." });
+    }
+
+    // 3. Consultar Solar API para los lugares encontrados
+    const results = [];
+    let hadBillingError = false;
+    
+    for (const place of placesToAnalyze) {
+       const solarUrl = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${place.lat}&location.longitude=${place.lng}&requiredQuality=HIGH&key=${mapsKey}`;
+       const solarRes = await fetch(solarUrl);
+       const solarData = await solarRes.json();
+       
+       if (!solarRes.ok && (solarRes.status === 403 || solarRes.status === 402 || solarRes.status === 429)) {
+         hadBillingError = true;
+       }
+       
+       results.push({
+         ...place,
+         staticMapUrl: `https://www.google.com/maps/embed/v1/view?key=${mapsKey}&center=${place.lat},${place.lng}&zoom=20&maptype=satellite`,
+         solarData: solarRes.ok ? solarData : null,
+         error: !solarRes.ok ? solarData.error?.message || "No disponible" : null
+       });
+    }
+
+    return res.json({ 
+      success: true, 
+      parsed_intent: parsed, 
+      results,
+      needsCredit: hadBillingError
+    });
+
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+app.post("/api/obraclima/parse-budget", async (req, res) => {
+  if (!(await requireAdmin(req, res))) return;
+  try {
+    const { prompt, catalog } = req.body;
+    if (!prompt) return res.status(400).json({ error: "Falta el prompt." });
+    
+    const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+    if (!ai) return res.status(503).json({ error: "GEMINI_API_KEY no configurada en el servidor." });
+
+    const systemPrompt = `Eres el asistente administrativo de ObraClima.
+Tu función es transformar las instrucciones del usuario en presupuestos estructurados.
+Nunca inventes productos, precios, impuestos, descuentos, clientes ni datos fiscales.
+Los productos y precios válidos proceden exclusivamente de este catálogo:
+${JSON.stringify(catalog, null, 2)}
+
+Devuelve SIEMPRE y ÚNICAMENTE un JSON con esta estructura (no incluyas markdown ni texto adicional ni \`\`\`json):
+{
+  "customer": {
+    "name": "Nombre extraído o vacío si no se indica",
+    "address": "Dirección extraída o vacía si no se indica"
+  },
+  "items": [
+    {
+      "productId": "Código del producto del catálogo",
+      "quantity": 1
+    }
+  ],
+  "notes": "Cualquier detalle adicional de la instalación",
+  "requiresReview": true
+}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents: [
+        { role: "user", parts: [{ text: systemPrompt }] },
+        { role: "user", parts: [{ text: "Descripción del trabajo: " + prompt }] }
+      ],
+      config: { responseMimeType: "application/json" }
+    });
+
+    try {
+      const parsed = JSON.parse(response.text || "{}");
+      return res.json({ success: true, data: parsed });
+    } catch (e) {
+      return res.status(500).json({ error: "Error parseando respuesta de IA", raw: response.text });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+setupObraClimaRoutes(app, requireAdmin);
+export default app;

@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Store, MessageSquare, Settings, LogOut, Menu, X, ArrowLeft, Handshake, MapPin, Bot } from 'lucide-react';
+import { LayoutDashboard, Store, MessageSquare, Settings, LogOut, Menu, X, ArrowLeft, Handshake, MapPin, Bot, Sun, FileText } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
@@ -73,7 +73,9 @@ export default function AdminLayout() {
 
   const navItems = [
     { name: 'Dashboard', path: '/admin', icon: <LayoutDashboard size={20} />, roles: ['admin', 'business'] },
+    { name: 'ObraClima AI', path: '/admin/obraclima', icon: <FileText size={20} />, roles: ['admin'] },
     { name: 'Agente Prospector', path: '/admin/prospector', icon: <Bot size={20} />, roles: ['admin'] },
+    { name: 'Prospección Solar', path: '/admin/solar', icon: <Sun size={20} />, roles: ['admin'] },
     { name: 'Grafo de Cooperación', path: '/admin/cooperacion', icon: <Handshake size={20} />, roles: ['admin'] },
     { name: 'Mi Negocio', path: '/admin/business', icon: <Store size={20} />, roles: ['business'] },
     { name: 'Negocios (Todos)', path: '/admin/businesses', icon: <Store size={20} />, roles: ['admin'] },
@@ -83,7 +85,7 @@ export default function AdminLayout() {
   ];
 
   return (
-    <div className="flex flex-col md:flex-row h-[100dvh] bg-slate-50 font-sans overflow-hidden">
+    <div className="flex flex-col md:flex-row h-[100dvh] bg-slate-50 font-sans overflow-hidden text-slate-900 admin-light">
       {/* Topbar móvil (visible solo en pantallas pequeñas) */}
       <header className="md:hidden flex items-center justify-between px-4 py-3 bg-slate-900 text-white z-30 shrink-0 border-b border-slate-800 shadow-sm">
         <div className="flex items-center space-x-3">
