@@ -81,12 +81,13 @@ export default function ObraClimaMiniApp() {
   const [selectedClientId, setSelectedClientId] = useState<string>('c1');
   const [showNewClientModal, setShowNewClientModal] = useState(false);
 
-  // Estado aislado para Ingresar Producto por URL (Scraper WooCommerce)
+  // Estado aislado para Ingresar Producto por URL (Scraper Universal y Masivo)
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [scrapeUrlInput, setScrapeUrlInput] = useState('');
   const [scrapingUrl, setScrapingUrl] = useState(false);
   const [scrapeMsg, setScrapeMsg] = useState<string | null>(null);
   const [scrapeErr, setScrapeErr] = useState<string | null>(null);
+  const [lastScrapedProduct, setLastScrapedProduct] = useState<any | null>(null);
 
   const handleMiniScrape = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,6 +95,7 @@ export default function ObraClimaMiniApp() {
     setScrapingUrl(true);
     setScrapeMsg(null);
     setScrapeErr(null);
+    setLastScrapedProduct(null);
     try {
       const res = await adminFetch('/api/obraclima/prospectar-url', {
         method: 'POST',
@@ -102,9 +104,12 @@ export default function ObraClimaMiniApp() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Error al procesar la URL del producto.');
+        throw new Error(data.error || 'Error al procesar la prospección del producto o dominio.');
       }
       setScrapeMsg(data.message);
+      if (data.product || data.sampleProduct) {
+        setLastScrapedProduct(data.product || data.sampleProduct);
+      }
       setScrapeUrlInput('');
     } catch (err: any) {
       setScrapeErr(err.message || 'Error al conectar con el scraper.');
@@ -736,11 +741,16 @@ export default function ObraClimaMiniApp() {
                 <div className="flex justify-between items-center">
                   <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                     <Link2 size={14} />
-                    <span>Ingresar Producto por URL</span>
+                    <span>Prospección por URL o Dominio</span>
                   </span>
                   <button
                     type="button"
-                    onClick={() => setShowUrlModal(false)}
+                    onClick={() => {
+                      setShowUrlModal(false);
+                      setScrapeMsg(null);
+                      setScrapeErr(null);
+                      setLastScrapedProduct(null);
+                    }}
                     className="text-[11px] text-slate-400 hover:text-white"
                   >
                     Cerrar
@@ -750,7 +760,7 @@ export default function ObraClimaMiniApp() {
                   <input
                     type="url"
                     required
-                    placeholder="https://tienda.com/producto/..."
+                    placeholder="https://www.bricocentrovigo.es/ o URL producto"
                     value={scrapeUrlInput}
                     onChange={(e) => setScrapeUrlInput(e.target.value)}
                     className="flex-1 bg-slate-900 border border-emerald-800/60 rounded-lg px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
@@ -760,7 +770,7 @@ export default function ObraClimaMiniApp() {
                     disabled={scrapingUrl}
                     className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shrink-0 disabled:opacity-50 transition"
                   >
-                    {scrapingUrl ? 'Extrayendo...' : 'Ingresar'}
+                    {scrapingUrl ? 'Extrayendo...' : 'Prospectar'}
                   </button>
                 </form>
 
@@ -775,6 +785,28 @@ export default function ObraClimaMiniApp() {
                   <div className="p-2.5 bg-red-900/50 border border-red-600/60 rounded-lg text-xs text-red-200 flex items-start gap-1.5">
                     <AlertCircle size={15} className="text-red-400 shrink-0 mt-0.5" />
                     <span>{scrapeErr}</span>
+                  </div>
+                )}
+
+                {lastScrapedProduct && (
+                  <div className="p-3 bg-slate-900/90 border border-emerald-500/40 rounded-lg text-xs space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-mono text-emerald-400 font-bold">
+                        Ref: {lastScrapedProduct.sku || 'S/R'}
+                      </span>
+                      <span className="text-emerald-300 font-bold text-sm">
+                        {Number(lastScrapedProduct.precio).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                      </span>
+                    </div>
+                    <div className="font-semibold text-white">{lastScrapedProduct.nombre}</div>
+                    {lastScrapedProduct.descripcion && (
+                      <div className="text-[11px] text-slate-300 bg-slate-800/70 p-2 rounded border border-slate-700 max-h-24 overflow-y-auto whitespace-pre-line">
+                        {lastScrapedProduct.descripcion}
+                      </div>
+                    )}
+                    <div className="text-[10px] text-emerald-400 flex items-center gap-1">
+                      <span>🧠 Sincronizado con el Cerebro de ObraClima</span>
+                    </div>
                   </div>
                 )}
               </div>

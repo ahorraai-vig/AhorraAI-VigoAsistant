@@ -1,6 +1,6 @@
 {
   "name": "Asistente Vigo",
-  "description": "Asistente turístico local de Vigo con panel de administración.",
+  "description": "Asistente turístico local de Vigo con panel de administración y ecosistema ObraClima para presupuestos, facturación y prospección de catálogos con IA.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

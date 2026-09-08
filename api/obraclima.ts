@@ -7,6 +7,7 @@ import {
   generateCourtesyTextWithGemini,
   sendOfficialEmailWithNativePdfAttachment
 } from "./obraclima_pdf_mailer";
+import { setupObraClimaScraperRoutes, inMemoryProspeccion } from "./obraclima_scraper";
 
 // Helper to initialize Supabase client for secure backend operations
 export function getSupabaseClient() {
@@ -262,6 +263,17 @@ export async function parseBudgetWithAi(promptText: string) {
   // Pre-filter prompt to eliminate any PII before it leaves the backend
   const { sanitizedPrompt } = sanitizePromptForAi(promptText);
 
+  // Combinar catálogo oficial con productos y referencias recopiladas de prospección (Cerebro ObraClima)
+  const prospectedItems = inMemoryProspeccion.slice(0, 40).map(p => ({
+    code: p.sku || `PROV-${(p.nombre || 'ITEM').slice(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
+    category: p.categoria || 'Suministros y Proveedores',
+    name: p.nombre,
+    description: p.descripcion ? `${p.nombre} (${p.descripcion.slice(0, 160)})` : p.nombre,
+    unitPrice: p.precio,
+    unit: 'ud'
+  }));
+  const fullBrainCatalog = [...db.catalog, ...prospectedItems];
+
   const systemPrompt = `Eres el asistente técnico de estimación de ObraClima S.L. (Vigo) para valoración de obras, reformas, climatización y fontanería.
 
 CUMPLIMIENTO RGPD OBLIGATORIO (PROTECCIÓN DE DATOS PERSONALES):
@@ -269,8 +281,8 @@ CUMPLIMIENTO RGPD OBLIGATORIO (PROTECCIÓN DE DATOS PERSONALES):
 - Concéntrate EXCLUSIVAMENTE en las especificaciones técnicas de la obra: metros cuadrados, estancias, número de unidades, modelos de equipos, mano de obra de instalación y materiales.
 - Asocia cada concepto a los ítems del catálogo oficial de ObraClima cuando aplique.
 
-Catálogo de referencia oficial de productos y servicios:
-${JSON.stringify(db.catalog, null, 2)}
+Catálogo de referencia oficial y datos prospectados de mercado (Cerebro ObraClima):
+${JSON.stringify(fullBrainCatalog, null, 2)}
 
 Instrucciones:
 1. Desglosa cada partida técnica necesaria (máquinas/splits, tuberías de cobre, soportes antivibración, canaletas, mano de obra especializada).
@@ -976,4 +988,6 @@ Devuelve SOLO JSON (sin markdown):
     }
   });
 
+  // Integrar rutas de prospección masiva y scraping de catálogos
+  setupObraClimaScraperRoutes(app);
 }

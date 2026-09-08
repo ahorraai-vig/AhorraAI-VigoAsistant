@@ -1,20 +1,71 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { adminFetch } from '../../../../lib/apiAuth';
-import { Link2, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { 
+  Link2, 
+  CheckCircle2, 
+  AlertCircle, 
+  Loader2, 
+  Search, 
+  Sparkles, 
+  Database, 
+  ExternalLink, 
+  Code, 
+  RefreshCw,
+  Plus,
+  Layers,
+  ChevronDown,
+  ChevronUp
+} from 'lucide-react';
 
-export default function CatalogTab({ catalog, refresh }: { catalog: any[], refresh: () => void }) {
+export function CatalogTab({ catalog, refresh }: { catalog: any[], refresh: () => void }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [formData, setFormData] = useState({ code: '', name: '', category: '', price: 0, unit: 'ud', iva: 21 });
-  const [saving, setSaving] = useState(false);
-
-  // Estado aislado para Ingresar Producto por URL (Scraper WooCommerce)
   const [showUrlModal, setShowUrlModal] = useState(false);
+  const [modalMode, setModalMode] = useState<'url' | 'html'>('url');
   const [urlInput, setUrlInput] = useState('');
+  const [htmlInput, setHtmlInput] = useState('');
   const [scraping, setScraping] = useState(false);
   const [scraperMessage, setScraperMessage] = useState<string | null>(null);
   const [scraperError, setScraperError] = useState<string | null>(null);
+  const [lastProduct, setLastProduct] = useState<any | null>(null);
+
+  // Pestañas de visualización: Catálogo Oficial vs Prospectados (Cerebro IA)
+  const [activeCatalogView, setActiveCatalogView] = useState<'oficial' | 'prospectados'>('oficial');
+  const [prospectados, setProspectados] = useState<any[]>([]);
+  const [loadingProspectados, setLoadingProspectados] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedDescId, setExpandedDescId] = useState<string | null>(null);
+
+  const [formData, setFormData] = useState({
+    code: '',
+    name: '',
+    category: '',
+    price: 0,
+    unit: 'ud'
+  });
+  const [saving, setSaving] = useState(false);
+
+  // Cargar productos prospectados desde Supabase
+  const loadProspectados = async () => {
+    setLoadingProspectados(true);
+    try {
+      const res = await adminFetch('/api/obraclima/prospectados');
+      const data = await res.json();
+      if (data && Array.isArray(data.items)) {
+        setProspectados(data.items);
+      }
+    } catch (err) {
+      console.warn('Error cargando prospectados:', err);
+    } finally {
+      setLoadingProspectados(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProspectados();
+  }, []);
 
   const handleSave = async () => {
+    if (!formData.name) return;
     setSaving(true);
     await adminFetch('/api/obraclima/catalog', {
       method: 'POST',
@@ -28,25 +79,44 @@ export default function CatalogTab({ catalog, refresh }: { catalog: any[], refre
 
   const handleScrapeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!urlInput.trim()) return;
+    if (modalMode === 'url' && !urlInput.trim()) return;
+    if (modalMode === 'html' && !htmlInput.trim()) return;
 
     setScraping(true);
     setScraperMessage(null);
     setScraperError(null);
+    setLastProduct(null);
 
     try {
-      const res = await adminFetch('/api/obraclima/prospectar-url', {
+      let endpoint = '/api/obraclima/prospectar-url';
+      let body: any = { url: urlInput.trim() };
+
+      if (modalMode === 'html') {
+        endpoint = '/api/obraclima/prospectar-html';
+        body = { html: htmlInput.trim(), url: urlInput.trim() || undefined };
+      }
+
+      const res = await adminFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: urlInput.trim() })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
+
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Error al procesar la URL del producto.');
+        throw new Error(data.error || 'Error al procesar la prospección del producto o catálogo.');
       }
-      // Respuesta exacta estipulada
+
       setScraperMessage(data.message);
-      setUrlInput('');
+      if (data.product || data.sampleProduct) {
+        setLastProduct(data.product || data.sampleProduct);
+      }
+
+      if (modalMode === 'url') setUrlInput('');
+      if (modalMode === 'html') setHtmlInput('');
+
+      // Recargar catálogo de prospección
+      await loadProspectados();
     } catch (err: any) {
       setScraperError(err.message || 'Error al conectar con el scraper.');
     } finally {
@@ -54,15 +124,43 @@ export default function CatalogTab({ catalog, refresh }: { catalog: any[], refre
     }
   };
 
+  // Traspasar producto prospectado al catálogo oficial
+  const handleAdoptToOfficial = async (item: any) => {
+    const newCode = item.sku || `PR-${Math.floor(1000 + Math.random() * 9000)}`;
+    setFormData({
+      code: newCode,
+      name: item.nombre,
+      category: item.categoria || 'Equipos',
+      price: item.precio,
+      unit: 'ud'
+    });
+    setShowAdd(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Filtrado de prospectados
+  const filteredProspectados = prospectados.filter(p => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    return (
+      (p.nombre || '').toLowerCase().includes(term) ||
+      (p.sku || '').toLowerCase().includes(term) ||
+      (p.categoria || '').toLowerCase().includes(term) ||
+      (p.descripcion || '').toLowerCase().includes(term) ||
+      (p.origen_url || '').toLowerCase().includes(term)
+    );
+  });
+
   return (
     <div className="max-w-5xl">
+      {/* Header y Acciones Principales */}
       <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Catálogo de Productos y Servicios</h2>
-          <p className="text-xs text-slate-500">Tarifas base y productos registrados en el sistema</p>
+          <h2 className="text-xl font-bold text-slate-800">Catálogo de Productos y Precios</h2>
+          <p className="text-xs text-slate-500">Gestión de tarifas oficiales y prospección automatizada para el Cerebro de ObraClima</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Botón aislado requerido por la especificación */}
+          {/* Botón de Prospección Masiva / URL */}
           <button
             onClick={() => {
               setShowUrlModal(!showUrlModal);
@@ -71,79 +169,190 @@ export default function CatalogTab({ catalog, refresh }: { catalog: any[], refre
             }}
             className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 flex items-center gap-1.5 text-sm transition shadow-sm"
           >
-            <Link2 size={16} />
-            <span>Ingresar Producto por URL</span>
+            <Sparkles size={16} />
+            <span>Ingresar Producto / Dominio</span>
           </button>
-          <button onClick={() => setShowAdd(!showAdd)} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 text-sm">
-            + Nuevo Ítem
+          <button 
+            onClick={() => setShowAdd(!showAdd)} 
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 text-sm flex items-center gap-1.5 transition"
+          >
+            <Plus size={16} />
+            <span>Nuevo Ítem Oficial</span>
           </button>
         </div>
       </div>
 
-      {/* Módulo aislado para Ingresar Producto por URL */}
+      {/* Módulo de Prospección Inteligente (URL o Código HTML de Inspector) */}
       {showUrlModal && (
-        <div className="bg-emerald-50/70 border border-emerald-200 p-5 rounded-xl mb-6 shadow-sm">
+        <div className="bg-emerald-50/80 border border-emerald-200 p-5 rounded-xl mb-6 shadow-sm">
           <div className="flex justify-between items-center mb-3">
             <div className="flex items-center gap-2">
-              <Link2 size={18} className="text-emerald-700" />
-              <h3 className="font-bold text-emerald-900 text-sm">Ingresar Producto por URL (WooCommerce)</h3>
+              <Sparkles size={18} className="text-emerald-700" />
+              <h3 className="font-bold text-emerald-900 text-sm">Prospección y Recolección de Datos de Proveedores</h3>
             </div>
-            <button
-              onClick={() => setShowUrlModal(false)}
-              className="text-xs text-emerald-700 hover:text-emerald-900 font-medium"
-            >
-              Cerrar
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Selector de Modo: URL o HTML */}
+              <div className="flex rounded-lg border border-emerald-300 bg-white p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setModalMode('url')}
+                  className={`px-2.5 py-1 rounded-md transition font-medium ${
+                    modalMode === 'url' ? 'bg-emerald-700 text-white shadow-xs' : 'text-emerald-800 hover:text-emerald-950'
+                  }`}
+                >
+                  Por URL o Dominio
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalMode('html')}
+                  className={`px-2.5 py-1 rounded-md transition font-medium ${
+                    modalMode === 'html' ? 'bg-emerald-700 text-white shadow-xs' : 'text-emerald-800 hover:text-emerald-950'
+                  }`}
+                >
+                  Pegar HTML (Inspector)
+                </button>
+              </div>
+              <button
+                onClick={() => setShowUrlModal(false)}
+                className="text-xs text-emerald-700 hover:text-emerald-900 font-medium px-2 py-1"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
 
           <p className="text-xs text-emerald-800 mb-3">
-            Introduce la URL del producto de un proveedor. El scraper extraerá el título, precio y SKU bajo normativa de minimización de datos (sin cookies ni PII) y registrará la trazabilidad en Supabase.
+            {modalMode === 'url'
+              ? 'Introduce la URL de un producto o el dominio principal de la tienda (ej. https://www.bricocentrovigo.es/ o https://tienda.com/producto/...). El sistema extrae precio, referencia, descripción técnica y lo sincroniza directamente en el Cerebro IA de ObraClima y Supabase.'
+              : 'Pega el código HTML de la ficha del producto copiado desde las DevTools del navegador. El parser extraerá inmediatamente título, precio, referencia y características técnicas sin restricciones de red.'}
           </p>
 
-          <form onSubmit={handleScrapeSubmit} className="flex flex-col sm:flex-row gap-2">
-            <input
-              type="url"
-              required
-              placeholder="https://tienda-proveedor.com/producto/split-daikin-35kw"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              className="flex-1 p-2.5 bg-white border border-emerald-300 rounded-lg text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-400"
-            />
-            <button
-              type="submit"
-              disabled={scraping}
-              className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition disabled:opacity-50"
-            >
-              {scraping ? (
-                <>
-                  <Loader2 size={15} className="animate-spin" />
-                  <span>Extrayendo...</span>
-                </>
-              ) : (
-                <span>Ingresar Producto por URL</span>
-              )}
-            </button>
+          <form onSubmit={handleScrapeSubmit} className="space-y-3">
+            {modalMode === 'url' ? (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="url"
+                  required
+                  placeholder="https://www.bricocentrovigo.es/ o https://tienda.com/producto/..."
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  className="flex-1 p-2.5 bg-white border border-emerald-300 rounded-lg text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-400"
+                />
+                <button
+                  type="submit"
+                  disabled={scraping}
+                  className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition disabled:opacity-50"
+                >
+                  {scraping ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" />
+                      <span>Rastreando...</span>
+                    </>
+                  ) : (
+                    <span>Extraer y Prospectar</span>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <input
+                  type="url"
+                  placeholder="URL opcional de referencia (ej. https://www.bricocentrovigo.es/producto/...)"
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  className="w-full p-2 bg-white border border-emerald-300 rounded-lg text-xs text-slate-800 placeholder:text-slate-400"
+                />
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Pega aquí el código HTML (o fragmento con h1, precio y especificaciones)..."
+                  value={htmlInput}
+                  onChange={(e) => setHtmlInput(e.target.value)}
+                  className="w-full p-2.5 bg-white border border-emerald-300 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-400"
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={scraping}
+                    className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold flex items-center gap-2 transition disabled:opacity-50"
+                  >
+                    {scraping ? <Loader2 size={14} className="animate-spin" /> : <Code size={14} />}
+                    <span>Procesar HTML con Parser Universal</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </form>
 
+          {/* Mensaje de Confirmación */}
           {scraperMessage && (
-            <div className="mt-3 p-3 bg-white border border-emerald-300 rounded-lg text-xs font-semibold text-emerald-900 flex items-center gap-2">
-              <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+            <div className="mt-3 p-3 bg-white border border-emerald-300 rounded-lg text-xs font-semibold text-emerald-900 flex items-start gap-2">
+              <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
               <span>{scraperMessage}</span>
             </div>
           )}
 
+          {/* Error */}
           {scraperError && (
-            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-center gap-2">
-              <AlertCircle size={16} className="text-red-600 shrink-0" />
+            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-start gap-2">
+              <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
               <span>{scraperError}</span>
+            </div>
+          )}
+
+          {/* Ficha Visual del Producto Recién Extraído */}
+          {lastProduct && (
+            <div className="mt-4 p-4 bg-white border border-emerald-300 rounded-xl shadow-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+                  <Sparkles size={14} />
+                  <span>Producto Extraído e Integrado en el Cerebro de ObraClima</span>
+                </div>
+                <span className="text-[11px] px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-medium">
+                  Ref: {lastProduct.sku || 'S/R'}
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-900 text-sm mb-1">{lastProduct.nombre}</h4>
+              <div className="flex items-baseline gap-2 mb-2">
+                <span className="text-lg font-extrabold text-emerald-700">
+                  {lastProduct.precio.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                </span>
+                {lastProduct.categoria && (
+                  <span className="text-xs text-slate-500">| {lastProduct.categoria}</span>
+                )}
+              </div>
+              {lastProduct.descripcion && (
+                <div className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-200 line-clamp-3 mb-2 whitespace-pre-line">
+                  {lastProduct.descripcion}
+                </div>
+              )}
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <a
+                  href={lastProduct.origen_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 hover:underline flex items-center gap-1 truncate max-w-md"
+                >
+                  <ExternalLink size={12} />
+                  <span className="truncate">{lastProduct.origen_url}</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => handleAdoptToOfficial(lastProduct)}
+                  className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium text-xs transition"
+                >
+                  + Copiar a Catálogo Base
+                </button>
+              </div>
             </div>
           )}
         </div>
       )}
 
+      {/* Formulario Añadir Nuevo Ítem Oficial */}
       {showAdd && (
         <div className="bg-white p-6 rounded-xl border border-slate-200 mb-6 shadow-sm">
-          <h3 className="font-bold text-slate-800 mb-4">Añadir al Catálogo</h3>
+          <h3 className="font-bold text-slate-800 mb-4">Añadir al Catálogo Oficial</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
              <input placeholder="Código (ej. AC001)" className="p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white text-slate-900 placeholder:text-slate-400" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} />
              <input placeholder="Nombre / Descripción" className="p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white text-slate-900 placeholder:text-slate-400 lg:col-span-2" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
@@ -162,7 +371,7 @@ export default function CatalogTab({ catalog, refresh }: { catalog: any[], refre
              
              <div>
                 <label className="block text-xs text-slate-500 mb-1">Precio (€)</label>
-                <input type="number" className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white text-slate-900 font-semibold" value={formData.price} onChange={e => setFormData({...formData, price: Number(e.target.value)})} />
+                <input type="number" step="any" className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white text-slate-900 font-semibold" value={formData.price} onChange={e => setFormData({...formData, price: Number(e.target.value)})} />
              </div>
              
              <div>
@@ -171,35 +380,204 @@ export default function CatalogTab({ catalog, refresh }: { catalog: any[], refre
              </div>
           </div>
           <div className="flex justify-end gap-2">
-            <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">Cancelar</button>
-            <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Guardar</button>
+            <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 text-sm">Cancelar</button>
+            <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">Guardar</button>
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-            <tr>
-              <th className="p-4 font-semibold w-24">Código</th>
-              <th className="p-4 font-semibold">Nombre</th>
-              <th className="p-4 font-semibold w-32">Categoría</th>
-              <th className="p-4 font-semibold w-24 text-right">Precio</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {catalog.map((c: any) => (
-              <tr key={c.id} className="hover:bg-slate-50">
-                <td className="p-4 font-medium text-slate-800">{c.code}</td>
-                <td className="p-4 text-slate-600">{c.name}</td>
-                <td className="p-4 text-slate-500">{c.category}</td>
-                <td className="p-4 font-medium text-slate-800 text-right">{c.price.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {catalog.length === 0 && <div className="p-8 text-center text-slate-500">No hay productos en el catálogo.</div>}
+      {/* Selector de Vistas de Catálogo */}
+      <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveCatalogView('oficial')}
+            className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1.5 ${
+              activeCatalogView === 'oficial'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Layers size={15} />
+            <span>Tarifas Oficiales ({catalog.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveCatalogView('prospectados')}
+            className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1.5 ${
+              activeCatalogView === 'prospectados'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'text-emerald-800 hover:bg-emerald-50'
+            }`}
+          >
+            <Database size={15} />
+            <span>Cerebro IA / Prospectados ({prospectados.length})</span>
+          </button>
+        </div>
+
+        {activeCatalogView === 'prospectados' && (
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Buscar por nombre, SKU, tienda..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 w-52 sm:w-64"
+              />
+            </div>
+            <button
+              onClick={loadProspectados}
+              disabled={loadingProspectados}
+              title="Actualizar lista de prospección"
+              className="p-1.5 text-slate-500 hover:text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 transition"
+            >
+              <RefreshCw size={14} className={loadingProspectados ? 'animate-spin text-emerald-600' : ''} />
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* VISTA 1: Catálogo Oficial */}
+      {activeCatalogView === 'oficial' && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+              <tr>
+                <th className="p-4 font-semibold w-28">Código</th>
+                <th className="p-4 font-semibold">Nombre / Descripción</th>
+                <th className="p-4 font-semibold w-32">Categoría</th>
+                <th className="p-4 font-semibold w-28 text-right">Precio</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {catalog.map((c: any) => (
+                <tr key={c.id || c.code} className="hover:bg-slate-50">
+                  <td className="p-4 font-mono text-xs font-semibold text-slate-800">{c.code}</td>
+                  <td className="p-4 text-slate-800 font-medium">{c.name}</td>
+                  <td className="p-4 text-slate-500 text-xs">
+                    <span className="px-2 py-0.5 bg-slate-100 rounded-md text-slate-700">
+                      {c.category || 'General'}
+                    </span>
+                  </td>
+                  <td className="p-4 font-bold text-slate-900 text-right">
+                    {Number(c.price).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {catalog.length === 0 && <div className="p-8 text-center text-slate-500">No hay productos en el catálogo oficial.</div>}
+        </div>
+      )}
+
+      {/* VISTA 2: Catálogo de Prospección (Alimentación del Cerebro de ObraClima) */}
+      {activeCatalogView === 'prospectados' && (
+        <div className="space-y-3">
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Database size={16} className="text-emerald-700 shrink-0" />
+              <span>
+                Estos productos y referencias técnicas alimentan el <strong>Cerebro IA de ObraClima</strong> al calcular presupuestos y contrastar tarifas reales de mercado en Vigo y Galicia.
+              </span>
+            </div>
+            <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-md">
+              {filteredProspectados.length} Registros
+            </span>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                <tr>
+                  <th className="p-3 font-semibold w-28">Ref / SKU</th>
+                  <th className="p-3 font-semibold">Producto y Especificaciones</th>
+                  <th className="p-3 font-semibold w-32">Proveedor / Origen</th>
+                  <th className="p-3 font-semibold w-24 text-right">Precio</th>
+                  <th className="p-3 font-semibold w-28 text-center">Acción</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredProspectados.map((p: any) => {
+                  let hostname = 'Proveedor';
+                  try { hostname = new URL(p.origen_url).hostname.replace(/^www\./, ''); } catch {}
+                  const isExpanded = expandedDescId === p.id;
+
+                  return (
+                    <React.Fragment key={p.id || p.origen_url}>
+                      <tr className="hover:bg-slate-50/80 transition">
+                        <td className="p-3 align-top font-mono text-xs font-semibold text-emerald-800">
+                          {p.sku || <span className="text-slate-400 font-normal italic">S/R</span>}
+                        </td>
+                        <td className="p-3 align-top">
+                          <div className="font-semibold text-slate-900 text-sm">{p.nombre}</div>
+                          {p.categoria && (
+                            <div className="text-[11px] text-slate-500 mt-0.5">{p.categoria}</div>
+                          )}
+                          {p.descripcion && (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedDescId(isExpanded ? null : p.id)}
+                              className="text-[11px] text-emerald-700 hover:text-emerald-900 flex items-center gap-0.5 mt-1 font-medium"
+                            >
+                              <span>{isExpanded ? 'Ocultar detalles' : 'Ver ficha técnica completa'}</span>
+                              {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                            </button>
+                          )}
+                        </td>
+                        <td className="p-3 align-top text-xs text-slate-600">
+                          <a
+                            href={p.origen_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 hover:underline flex items-center gap-1 font-medium truncate max-w-[130px]"
+                            title={p.origen_url}
+                          >
+                            <span className="truncate">{hostname}</span>
+                            <ExternalLink size={11} className="shrink-0" />
+                          </a>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {new Date(p.fecha_captura || Date.now()).toLocaleDateString('es-ES')}
+                          </div>
+                        </td>
+                        <td className="p-3 align-top font-bold text-slate-900 text-right whitespace-nowrap">
+                          {Number(p.precio).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                        </td>
+                        <td className="p-3 align-top text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleAdoptToOfficial(p)}
+                            className="px-2 py-1 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 rounded text-xs font-medium transition"
+                            title="Copiar a tarifas oficiales de ObraClima"
+                          >
+                            + Catálogo
+                          </button>
+                        </td>
+                      </tr>
+                      {isExpanded && p.descripcion && (
+                        <tr className="bg-slate-50/60 border-t border-slate-100">
+                          <td colSpan={5} className="p-3 pl-8">
+                            <div className="text-xs text-slate-700 whitespace-pre-line bg-white p-3 rounded-lg border border-slate-200">
+                              <span className="font-semibold text-slate-900 block mb-1">Especificaciones Técnicas & Medidas:</span>
+                              {p.descripcion}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+            {filteredProspectados.length === 0 && (
+              <div className="p-8 text-center text-slate-500 text-xs">
+                {searchTerm ? 'No se encontraron productos con ese filtro.' : 'No hay productos prospectados aún. Introduce una URL arriba para comenzar.'}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+export default CatalogTab;
