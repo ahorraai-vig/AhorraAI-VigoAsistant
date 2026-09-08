@@ -815,11 +815,15 @@ La IA de ObraClima cruzará tu texto con el catálogo de tarifas oficiales, calc
 
     try {
       const cleanPrompt = userText.replace(/^\/presupuesto\s*/i, '').trim();
+      // parseBudgetWithAi automáticamente seudonimiza y elimina PII antes de consultar a Gemini
       const parsed = await parseBudgetWithAi(cleanPrompt || userText);
 
-      // Crear el presupuesto en la base de datos
+      // Fusión en Backend: asociar cliente de forma segura en servidor
+      const client = obraClimaDb.clients[0] || { id: "c-default", name: "Cliente Particular", city: "Vigo" };
       const budget = createBudget({
-        customer: parsed.customer || { name: "Cliente Particular", city: "Vigo" },
+        customer: client,
+        client: client,
+        clientId: client.id,
         items: parsed.items || [],
         notes: parsed.notes || ""
       });

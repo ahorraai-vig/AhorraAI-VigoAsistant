@@ -1,5 +1,55 @@
 import { GoogleGenAI } from "@google/genai";
+import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+
+// Helper to initialize Supabase client for secure backend operations
+export function getSupabaseClient() {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL?.replace(/\/rest\/v1\/?$/, '')?.replace(/\/$/, '') || process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (supabaseUrl && supabaseKey) {
+    return createClient(supabaseUrl, supabaseKey);
+  }
+  return null;
+}
+
+// Secure client resolver: fetches customer PII from Supabase (or fallback local DB) in backend only
+export async function getClientById(clientId: string) {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('id', clientId)
+        .maybeSingle();
+
+      if (!error && data) {
+        return {
+          id: data.id,
+          name: data.name,
+          address: data.address || '',
+          postalCode: data.postal_code || data.postalCode || '',
+          city: data.city || 'Vigo',
+          province: data.province || 'Pontevedra',
+          nif: data.nif || data.cif || '',
+          phone: data.phone || '',
+          email: data.email || ''
+        };
+      }
+    } catch (err) {
+      console.warn('[Supabase getClientById fallback]:', err);
+    }
+  }
+  return db.clients.find(c => c.id === clientId) || db.clients[0] || {
+    id: "c-default",
+    name: "Cliente Particular",
+    address: "Vigo",
+    postalCode: "36200",
+    city: "Vigo",
+    province: "Pontevedra",
+    nif: ""
+  };
+}
 
 // === IN-MEMORY DATABASE ===
 export const db = {
@@ -150,37 +200,91 @@ export function convertBudgetToInvoice(budgetId: string) {
   return invoice;
 }
 
-// AI Parsing logic reusable by Express and Telegram bot
+// === RGPD / GDPR SANITIZATION & PSEUDONYMIZATION ===
+/**
+ * Scans and strips any Personally Identifiable Information (PII)
+ * (names, DNI/NIE/CIF, phone numbers, emails, postal addresses)
+ * before any prompt text is transmitted to an external LLM.
+ */
+export function sanitizePromptForAi(rawText: string): { sanitizedPrompt: string; hasPiiDetected: boolean } {
+  let sanitized = rawText;
+  let detected = false;
+
+  // 1. Email addresses
+  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/gi;
+  if (emailRegex.test(sanitized)) {
+    detected = true;
+    sanitized = sanitized.replace(emailRegex, '[CORREO_SEUDONIMIZADO]');
+  }
+
+  // 2. Spanish DNI / NIE / CIF
+  const dniNieCifRegex = /\b([XYZxyz]?\d{7,8}[A-Za-z]|[ABCDEFGHJNPQRSUVWabcdefghjnpqrsuvw]\d{7}[0-9A-Ja-j])\b/g;
+  if (dniNieCifRegex.test(sanitized)) {
+    detected = true;
+    sanitized = sanitized.replace(dniNieCifRegex, '[NIF_SEUDONIMIZADO]');
+  }
+
+  // 3. Spanish Phone Numbers (mobile & landline)
+  const phoneRegex = /\b(?:\+?34\s*)?[6789]\d{2}(?:[\s.-]?\d{3}){2}\b/g;
+  if (phoneRegex.test(sanitized)) {
+    detected = true;
+    sanitized = sanitized.replace(phoneRegex, '[TEL_SEUDONIMIZADO]');
+  }
+
+  // 4. Street / Postal Addresses (Calle, Rúa, Avda, etc.)
+  const addressRegex = /\b(?:calle|c\/|rúa|rua|avenida|avda|av\.|plaza|pza\.|paseo|camino|carretera|crta\.)\s+[^,;\n]+/gi;
+  if (addressRegex.test(sanitized)) {
+    detected = true;
+    sanitized = sanitized.replace(addressRegex, '[UBICACION_TECNICA]');
+  }
+
+  // 5. Client name phrases (e.g. "para Juan Pérez", "cliente: María Gomez")
+  const clientPhraseRegex = /\b(?:para|cliente|nombre(?:\s+del?\s+cliente)?|de(?:\s+parte\s+de)?)\s*[:=]?\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+){1,3})/gi;
+  if (clientPhraseRegex.test(sanitized)) {
+    detected = true;
+    sanitized = sanitized.replace(clientPhraseRegex, 'para [CLIENTE_SEUDONIMIZADO]');
+  }
+
+  return { sanitizedPrompt: sanitized.trim(), hasPiiDetected: detected };
+}
+
+// AI Technical Parsing logic with strict RGPD decoupling (reusable by Express and Telegram bot)
 export async function parseBudgetWithAi(promptText: string) {
   const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
   if (!ai) throw new Error("GEMINI_API_KEY no está configurada.");
 
-  const systemPrompt = `Eres el asistente técnico de ObraClima S.L. (Vigo) para elaboración de presupuestos de climatización, fontanería y reformas.
-Analiza la solicitud y desglósala en partidas concretas, claras y bien valoradas en euros (€).
+  // Pre-filter prompt to eliminate any PII before it leaves the backend
+  const { sanitizedPrompt } = sanitizePromptForAi(promptText);
+
+  const systemPrompt = `Eres el asistente técnico de estimación de ObraClima S.L. (Vigo) para valoración de obras, reformas, climatización y fontanería.
+
+CUMPLIMIENTO RGPD OBLIGATORIO (PROTECCIÓN DE DATOS PERSONALES):
+- NUNCA proceses, almacenes, infieras ni devuelvas ninguna Información Personal Identificable (PII): queda TERMINANTEMENTE PROHIBIDO incluir nombres de clientes, domicilios, DNI/CIF o teléfonos.
+- Concéntrate EXCLUSIVAMENTE en las especificaciones técnicas de la obra: metros cuadrados, estancias, número de unidades, modelos de equipos, mano de obra de instalación y materiales.
+- Asocia cada concepto a los ítems del catálogo oficial de ObraClima cuando aplique.
 
 Catálogo de referencia oficial de productos y servicios:
 ${JSON.stringify(db.catalog, null, 2)}
 
 Instrucciones:
-1. Desglosa cada partida necesaria (por ejemplo: máquinas/splits, mano de obra de instalación, tuberías, soportes, etc.).
+1. Desglosa cada partida técnica necesaria (máquinas/splits, tuberías de cobre, soportes antivibración, canaletas, mano de obra especializada).
 2. Si un concepto coincide o se asimila a un ítem del catálogo, usa su código ("code"), su nombre oficial ("description") y su precio de catálogo ("unitPrice").
-3. Si el concepto es nuevo o específico, genera una "description" clara en español formal, y asigna un precio razonable ("unitPrice") o el precio que el usuario haya especificado.
-4. "quantity" debe ser siempre un número (mínimo 1).
-5. Extrae el nombre del cliente en "customer.name" y dirección o población en "customer.address" si se mencionan.
-6. Incluye observaciones técnicas o condiciones en "notes".
+3. Si el concepto es nuevo o específico, genera una "description" clara en español formal, y asigna un precio unitario razonable de mercado ("unitPrice").
+4. "quantity" debe ser siempre un número entero o decimal positivo (mínimo 1).
+5. Incluye exclusivamente notas técnicas sobre montaje, materiales o ejecución en "notes".
+6. NUNCA generes ni incluyas un objeto "customer".
 
 Devuelve OBLIGATORIAMENTE un JSON estricto con esta estructura:
 {
-  "customer": { "name": "", "address": "", "city": "" },
   "items": [
     {
       "code": "CÓDIGO_O_VACIO",
-      "description": "Descripción clara del trabajo o equipo",
+      "description": "Descripción técnica clara del trabajo o equipo",
       "quantity": 1,
       "unitPrice": 150
     }
   ],
-  "notes": "Notas adicionales"
+  "notes": "Observaciones exclusivamente técnicas de instalación o montaje"
 }`;
 
   const candidateModels = ["gemini-2.5-flash", "gemini-3.6-flash"];
@@ -193,7 +297,7 @@ Devuelve OBLIGATORIAMENTE un JSON estricto con esta estructura:
         model: modelName,
         contents: [
           { role: "user", parts: [{ text: systemPrompt }] },
-          { role: "user", parts: [{ text: `Solicitud de presupuesto: ${promptText}` }] }
+          { role: "user", parts: [{ text: `Especificaciones técnicas de obra: ${sanitizedPrompt}` }] }
         ],
         config: { responseMimeType: "application/json" }
       });
@@ -209,7 +313,11 @@ Devuelve OBLIGATORIAMENTE un JSON estricto con esta estructura:
     throw new Error(lastError.message || "Error al generar con IA");
   }
 
-  return JSON.parse(textResponse || "{}");
+  const parsed = JSON.parse(textResponse || "{}");
+  return {
+    items: Array.isArray(parsed.items) ? parsed.items : [],
+    notes: typeof parsed.notes === 'string' ? parsed.notes : ''
+  };
 }
 
 export function renderDocumentHtml(doc: any, type: 'presupuesto' | 'factura', config: any) {
@@ -512,11 +620,51 @@ export function setupObraClimaRoutes(app: any, requireAdmin: any) {
   // -- CLIENTS --
   app.get('/api/obraclima/clients', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('clients').select('*').order('name');
+        if (!error && data && data.length > 0) {
+          const mapped = data.map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            address: c.address || '',
+            postalCode: c.postal_code || c.postalCode || '',
+            city: c.city || 'Vigo',
+            province: c.province || 'Pontevedra',
+            nif: c.nif || c.cif || '',
+            phone: c.phone || '',
+            email: c.email || ''
+          }));
+          return res.json(mapped);
+        }
+      } catch (err) {
+        console.warn('[Supabase getClients fallback]:', err);
+      }
+    }
     res.json(db.clients);
   });
   app.post('/api/obraclima/clients', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
     const client = { id: crypto.randomUUID(), ...req.body };
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('clients').insert([{
+          id: client.id,
+          name: client.name,
+          nif: client.nif,
+          address: client.address,
+          postal_code: client.postalCode,
+          city: client.city,
+          province: client.province,
+          phone: client.phone,
+          email: client.email
+        }]);
+      } catch (err) {
+        console.warn('[Supabase client insert error]:', err);
+      }
+    }
     db.clients.push(client);
     res.json(client);
   });
@@ -575,15 +723,67 @@ export function setupObraClimaRoutes(app: any, requireAdmin: any) {
     res.json(invoice);
   });
 
+  // -- RGPD SECURE BUDGET GENERATION (BACKEND FUSION) --
+  app.post("/api/obraclima/generate-budget-rgpd", async (req: any, res: any) => {
+    if (!(await checkAuth(req, res))) return;
+    try {
+      const { technicalPrompt, clientId, prompt } = req.body;
+      const rawPrompt = technicalPrompt || prompt;
+      if (!rawPrompt) return res.status(400).json({ error: "Falta la descripción técnica de la obra." });
+
+      // 1. Desacoplamiento y Seudonimización estricta (RGPD)
+      const { sanitizedPrompt, hasPiiDetected } = sanitizePromptForAi(rawPrompt);
+
+      // 2. Ejecución LLM aislada (el modelo solo recibe datos técnicos de obra)
+      const technicalResult = await parseBudgetWithAi(sanitizedPrompt);
+
+      // 3. Consulta de PII en Supabase/BD en entorno seguro de backend
+      const targetClientId = clientId || db.clients[0]?.id || 'c1';
+      const client = await getClientById(targetClientId);
+
+      // 4. Fusión local en el servidor (backend assembly)
+      const newBudget = createBudget({
+        customer: client,
+        client: client,
+        clientId: client.id,
+        items: technicalResult.items || [],
+        notes: technicalResult.notes || ''
+      });
+
+      return res.json({
+        success: true,
+        budget: newBudget,
+        sanitized: hasPiiDetected,
+        message: "Presupuesto ensamblado con éxito con seudonimización RGPD."
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // -- AI PARSING (TEXT) --
   app.post("/api/obraclima/parse-text", async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
     try {
-      const { prompt } = req.body;
+      const { prompt, clientId } = req.body;
       if (!prompt) return res.status(400).json({ error: "Falta el prompt." });
       
-      const parsedData = await parseBudgetWithAi(prompt);
-      return res.json({ success: true, data: parsedData });
+      const { sanitizedPrompt, hasPiiDetected } = sanitizePromptForAi(prompt);
+      const parsedData = await parseBudgetWithAi(sanitizedPrompt);
+
+      let customer = undefined;
+      if (clientId) {
+        customer = await getClientById(clientId);
+      }
+      
+      return res.json({ 
+        success: true, 
+        data: {
+          ...parsedData,
+          customer: customer || undefined,
+          sanitized: hasPiiDetected
+        } 
+      });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }

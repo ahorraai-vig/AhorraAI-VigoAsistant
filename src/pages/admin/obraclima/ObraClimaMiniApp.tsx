@@ -72,6 +72,7 @@ export default function ObraClimaMiniApp() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiSuccessMsg, setAiSuccessMsg] = useState('');
+  const [selectedClientId, setSelectedClientId] = useState<string>('c1');
 
   // Telegram WebApp detection
   const isTelegram = typeof window !== 'undefined' && !!window.Telegram?.WebApp?.initDataUnsafe?.user;
@@ -135,30 +136,25 @@ export default function ObraClimaMiniApp() {
     setAiGenerating(true);
     setAiSuccessMsg('');
     try {
-      const res = await adminFetch('/api/obraclima/parse-text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: text })
-      });
-      const data = await res.json();
-      if (!data.success || !data.data) {
-        throw new Error(data.error || 'No se pudo interpretar el presupuesto');
-      }
+      const clientIdToUse = selectedClientId || clients[0]?.id || 'c1';
 
-      // Create budget
-      const parsed = data.data;
-      const createRes = await adminFetch('/api/obraclima/budgets', {
+      // Llamada al backend seguro con desacoplamiento RGPD:
+      // La IA solo recibe datos técnicos seudonimizados; el backend fusiona el cliente localmente.
+      const res = await adminFetch('/api/obraclima/generate-budget-rgpd', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customer: parsed.customer || { name: 'Cliente Particular', city: 'Vigo' },
-          items: parsed.items || [],
-          notes: parsed.notes || ''
+          technicalPrompt: text,
+          clientId: clientIdToUse
         })
       });
-      const newBudget = await createRes.json();
+      const data = await res.json();
+      if (!data.success || !data.budget) {
+        throw new Error(data.error || 'No se pudo generar el presupuesto con IA');
+      }
 
-      setAiSuccessMsg(`¡Presupuesto ${newBudget.number} generado con éxito por la IA!`);
+      const newBudget = data.budget;
+      setAiSuccessMsg(`¡Presupuesto ${newBudget.number} generado y ensamblado con éxito (Protegido RGPD)!`);
       setAiPrompt('');
       await loadData();
       
@@ -508,12 +504,31 @@ export default function ObraClimaMiniApp() {
                 </div>
               )}
 
+              {/* Selector de Cliente para Fusión Backend RGPD */}
+              <div className="mb-3">
+                <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                  <span>Asignar Cliente al Presupuesto:</span>
+                  <span className="text-[10px] text-emerald-400 font-medium">🛡️ RGPD: Datos no viajan a la IA</span>
+                </label>
+                <select
+                  value={selectedClientId}
+                  onChange={(e) => setSelectedClientId(e.target.value)}
+                  className="w-full bg-slate-900/90 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-blue-400"
+                >
+                  {clients.map((c: any) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.city ? `(${c.city})` : ''} {c.nif ? `- ${c.nif}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Prompt box */}
               <div className="relative">
                 <textarea
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="Ej: Presupuesto para Juan Pérez en Calle Rosalía de Castro: instalación de 2 splits Daikin en salón y dormitorio con línea frigorífica y soportes antivibración..."
+                  placeholder="Ej: Instalación de 2 splits Daikin en salón y dormitorio con 5m de línea frigorífica de cobre y soportes antivibración (solo datos técnicos de obra)..."
                   rows={4}
                   className="w-full bg-slate-900/90 border border-slate-700 rounded-xl p-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-400 leading-relaxed resize-none shadow-inner"
                 />
