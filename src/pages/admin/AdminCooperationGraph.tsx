@@ -15,7 +15,9 @@ import {
   Search, 
   Filter,
   ArrowUpRight,
-  ShieldCheck
+  ShieldCheck,
+  Copy,
+  Check
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Business, SynergyOpportunity } from '../../types';
@@ -32,6 +34,7 @@ export default function AdminCooperationGraph() {
 
   const [enriching, setEnriching] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -407,9 +410,28 @@ export default function AdminCooperationGraph() {
                       <span className="block text-slate-400 text-[11px]">{b.zone || 'Vigo'}</span>
                     </td>
                     <td className="py-3.5 px-4 font-mono font-bold text-blue-600">
-                      <span className="bg-blue-50 px-2 py-1 rounded border border-blue-100">
-                        {b.access_code || 'SIN_CLAVE'}
-                      </span>
+                      <div className="inline-flex items-center gap-1.5 bg-blue-50 px-2.5 py-1 rounded border border-blue-100">
+                        <span>{b.access_code || 'SIN_CLAVE'}</span>
+                        {b.access_code && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(b.access_code || '');
+                              setCopiedCode(b.access_code || null);
+                              setTimeout(() => setCopiedCode(null), 2000);
+                            }}
+                            className="p-0.5 text-blue-500 hover:text-blue-800 transition"
+                            title="Copiar clave al portapapeles"
+                          >
+                            {copiedCode === b.access_code ? (
+                              <Check size={13} className="text-emerald-600" />
+                            ) : (
+                              <Copy size={13} />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="py-3.5 px-4 text-slate-600">
                       {b.cooperation?.valleyHours || '15:30 - 18:00'}
@@ -422,8 +444,10 @@ export default function AdminCooperationGraph() {
                     <td className="py-3.5 px-4 text-right">
                       <Link
                         to={`/cooperacion?code=${encodeURIComponent(b.access_code || '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="text-blue-600 hover:text-blue-800 font-semibold inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition text-[11px]"
-                        title="Entrar al Portal Individual de este Comercio con su clave"
+                        title="Abrir el Portal Individual de este Comercio en una nueva pestaña"
                       >
                         <span>Ver Portal</span>
                         <ArrowUpRight size={13} />

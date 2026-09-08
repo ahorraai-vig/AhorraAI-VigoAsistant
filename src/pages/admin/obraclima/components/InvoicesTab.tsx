@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { adminFetch } from '../../../../lib/apiAuth';
 import DocumentEditor from './DocumentEditor';
-import { FileText, FileUp, Receipt } from 'lucide-react';
+import { FileText, FileUp, Receipt, Send } from 'lucide-react';
 import PrintTemplate from './PrintTemplate';
+import EmailModal from './EmailModal';
 
 export default function InvoicesTab({ invoices, clients, catalog, config, refresh }: any) {
   const [mode, setMode] = useState<'list' | 'create' | 'view'>('list');
   const [selected, setSelected] = useState<any>(null);
+  const [emailModalDoc, setEmailModalDoc] = useState<any>(null);
 
   const handleSave = async (data: any) => {
     await adminFetch('/api/obraclima/invoices', {
@@ -25,16 +27,35 @@ export default function InvoicesTab({ invoices, clients, catalog, config, refres
   if (mode === 'view' && selected) {
      return (
        <div className="bg-slate-900 fixed inset-0 z-50 overflow-y-auto pb-20">
-         <div className="bg-slate-800 p-4 sticky top-0 flex justify-between items-center print:hidden shadow-lg z-50">
+         <div className="bg-slate-800 p-4 sticky top-0 flex flex-wrap justify-between items-center print:hidden shadow-lg z-50 gap-3">
            <h3 className="text-white font-bold text-lg">Factura {selected.number}</h3>
-           <div className="flex gap-4">
-             <button onClick={() => setMode('list')} className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600">Cerrar</button>
-             <button onClick={() => window.print()} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">Imprimir PDF</button>
+           <div className="flex flex-wrap gap-2.5">
+             <button onClick={() => setMode('list')} className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">Cerrar</button>
+             <button onClick={() => window.print()} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold transition-colors">
+               Imprimir PDF
+             </button>
+             <button
+               onClick={() => setEmailModalDoc(selected)}
+               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold flex items-center gap-2 shadow-md transition-all active:scale-95"
+               title="Enviar factura con PDF oficial adjunto de forma nativa"
+             >
+               <Send size={16} /> Enviar Factura
+             </button>
            </div>
          </div>
          <div className="mt-8 shadow-2xl mx-auto max-w-[800px] print:shadow-none print:m-0 print:mt-0">
            <PrintTemplate data={selected} type="factura" config={config} preview={true} />
          </div>
+
+         {emailModalDoc && (
+           <EmailModal
+             isOpen={!!emailModalDoc}
+             onClose={() => setEmailModalDoc(null)}
+             doc={emailModalDoc}
+             type="factura"
+             config={config}
+           />
+         )}
        </div>
      );
   }
@@ -43,7 +64,7 @@ export default function InvoicesTab({ invoices, clients, catalog, config, refres
     <div className="max-w-5xl">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-bold text-slate-800">Facturas</h2>
-        <button onClick={() => setMode('create')} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 flex items-center gap-2">
+        <button onClick={() => setMode('create')} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors">
           <Receipt size={16} /> Crear Factura
         </button>
       </div>
@@ -52,11 +73,11 @@ export default function InvoicesTab({ invoices, clients, catalog, config, refres
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
             <tr>
-              <th className="p-4 font-semibold w-32">Número</th>
-              <th className="p-4 font-semibold w-32">Fecha</th>
+              <th className="p-4 font-semibold w-28">Número</th>
+              <th className="p-4 font-semibold w-28">Fecha</th>
               <th className="p-4 font-semibold">Cliente</th>
               <th className="p-4 font-semibold w-32 text-right">Total</th>
-              <th className="p-4 font-semibold w-24 text-center"></th>
+              <th className="p-4 font-semibold w-48 text-right">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -64,12 +85,26 @@ export default function InvoicesTab({ invoices, clients, catalog, config, refres
               <tr key={i.id} className="hover:bg-slate-50 transition-colors">
                 <td className="p-4 font-bold text-slate-800">{i.number}</td>
                 <td className="p-4 text-slate-600">{new Date(i.date).toLocaleDateString()}</td>
-                <td className="p-4 font-medium text-slate-800">{i.client?.name}</td>
+                <td className="p-4 font-medium text-slate-800">{i.client?.name || i.customer?.name || 'Cliente'}</td>
                 <td className="p-4 font-bold text-slate-800 text-right">{i.total.toLocaleString('es-ES', {minimumFractionDigits: 2})} €</td>
-                <td className="p-4 text-center">
-                   <button onClick={() => { setSelected(i); setMode('view'); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
+                <td className="p-4 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => setEmailModalDoc(i)}
+                      className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                      title="Enviar Factura con PDF adjunto de forma nativa"
+                    >
+                      <Send size={13} />
+                      <span>Enviar Factura</span>
+                    </button>
+                    <button
+                      onClick={() => { setSelected(i); setMode('view'); }}
+                      className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Ver Factura"
+                    >
                       <FileText size={18} />
-                   </button>
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -77,6 +112,16 @@ export default function InvoicesTab({ invoices, clients, catalog, config, refres
         </table>
         {invoices.length === 0 && <div className="p-8 text-center text-slate-500">No hay facturas emitidas.</div>}
       </div>
+
+      {emailModalDoc && (
+        <EmailModal
+          isOpen={!!emailModalDoc}
+          onClose={() => setEmailModalDoc(null)}
+          doc={emailModalDoc}
+          type="factura"
+          config={config}
+        />
+      )}
     </div>
   );
 }

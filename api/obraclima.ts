@@ -1,6 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import {
+  generateBudgetPdfBuffer,
+  uploadPdfToSupabaseStorage,
+  generateCourtesyTextWithGemini,
+  sendOfficialEmailWithNativePdfAttachment
+} from "./obraclima_pdf_mailer";
 
 // Helper to initialize Supabase client for secure backend operations
 export function getSupabaseClient() {
@@ -287,7 +293,7 @@ Devuelve OBLIGATORIAMENTE un JSON estricto con esta estructura:
   "notes": "Observaciones exclusivamente técnicas de instalación o montaje"
 }`;
 
-  const candidateModels = ["gemini-2.5-flash", "gemini-3.6-flash"];
+  const candidateModels = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"];
   let lastError = null;
   let textResponse = "";
 
@@ -807,7 +813,7 @@ Devuelve SOLO JSON (sin markdown):
   "notes": ""
 }`;
 
-      const candidateModels = ["gemini-2.5-flash", "gemini-3.6-flash"];
+      const candidateModels = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"];
       let lastError = null;
       let textResponse = "";
 
@@ -839,75 +845,133 @@ Devuelve SOLO JSON (sin markdown):
     }
   });
 
-  // -- SEND / LOG EMAIL DISPATCH --
-  app.post("/api/obraclima/send-email", async (req: any, res: any) => {
+  // -- GENERATE COURTESY TEXT WITH GEMINI --
+  app.post("/api/obraclima/generate-courtesy", async (req: any, res: any) => {
     try {
-      const { to, subject, body, docId, type } = req.body;
-      const recipients = Array.isArray(to) ? to : (to ? [to] : ['administracion@obraclima.com', 'ahorraai@gmail.com']);
-      
-      const doc = type === 'factura' 
+      const { doc, docId, type = 'presupuesto' } = req.body;
+      const targetDoc = doc || (type === 'factura'
         ? db.invoices.find(i => i.id === docId || i.number === docId)
-        : db.budgets.find(b => b.id === docId || b.number === docId);
+        : db.budgets.find(b => b.id === docId || b.number === docId));
 
-      const htmlContent = doc ? renderDocumentHtml(doc, type as any, db.config) : '';
-      const docNum = doc?.number || docId || 'documento';
-      const docTitle = type === 'factura' ? 'Factura' : 'Presupuesto';
-
-      // Check if SMTP is configured
-      const smtpHost = process.env.SMTP_HOST;
-      const smtpUser = process.env.SMTP_USER;
-      const smtpPass = process.env.SMTP_PASS;
-      const smtpPort = Number(process.env.SMTP_PORT) || 587;
-
-      if (smtpHost && smtpUser && smtpPass) {
-        try {
-          const nodemailer = await import('nodemailer');
-          const transporter = nodemailer.createTransport({
-            host: smtpHost,
-            port: smtpPort,
-            secure: smtpPort === 465,
-            auth: {
-              user: smtpUser,
-              pass: smtpPass
-            }
-          });
-
-          await transporter.sendMail({
-            from: `"ObraClima S.L. - Administración" <${smtpUser}>`,
-            to: recipients.join(', '),
-            subject: subject || `${docTitle} Oficial Nº ${docNum} - ObraClima S.L.`,
-            text: body,
-            html: body.replace(/\n/g, '<br/>'),
-            attachments: htmlContent ? [
-              {
-                filename: `${docTitle}_${docNum.replace('/', '-')}_ObraClima.html`,
-                content: htmlContent,
-                contentType: 'text/html'
-              }
-            ] : []
-          });
-
-          return res.json({ 
-            success: true, 
-            message: `Correo enviado exitosamente a: ${recipients.join(', ')} con el documento oficial adjunto.` 
-          });
-        } catch (mailErr: any) {
-          console.error("[Email send error]:", mailErr);
-          return res.status(500).json({ 
-            error: `Error enviando correo SMTP: ${mailErr.message || 'Fallo de autenticación o conexión'}` 
-          });
-        }
+      if (!targetDoc) {
+        return res.status(404).json({ error: "Documento no encontrado para redactar el texto de cortesía." });
       }
 
-      // If SMTP credentials are not yet set in environment, log the dispatch
-      console.log(`[ObraClima Email Dispatch] A: ${recipients.join(', ')} | Asunto: ${subject}`);
+      const courtesyText = await generateCourtesyTextWithGemini(targetDoc, type);
+      return res.json({ success: true, courtesyText });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -- GENERATE PDF & UPLOAD TO SUPABASE STORAGE BUCKET --
+  app.post("/api/obraclima/generate-pdf", async (req: any, res: any) => {
+    try {
+      const { doc, docId, type = 'presupuesto' } = req.body;
+      const targetDoc = doc || (type === 'factura'
+        ? db.invoices.find(i => i.id === docId || i.number === docId)
+        : db.budgets.find(b => b.id === docId || b.number === docId));
+
+      if (!targetDoc) {
+        return res.status(404).json({ error: "Documento no encontrado para generar PDF." });
+      }
+
+      const docTitle = type === 'factura' ? 'Factura' : 'Presupuesto';
+      const docNum = (targetDoc.number || '000').replace(/[\/\\]/g, '-');
+      const filename = `${docTitle}_${docNum}_ObraClima.pdf`;
+
+      // 1. Generar binario PDF oficial A4
+      const pdfBuffer = await generateBudgetPdfBuffer(targetDoc, type, db.config);
+
+      // 2. Guardar temporalmente en Bucket de Supabase Storage
+      const storageResult = await uploadPdfToSupabaseStorage(pdfBuffer, filename);
+
       return res.json({
         success: true,
-        message: `Envío registrado para ${recipients.join(', ')}. Puedes usar los botones de Gmail o cliente de correo para enviarlo inmediatamente.`,
-        recipients,
-        subject
+        filename,
+        sizeBytes: pdfBuffer.length,
+        storageUrl: storageResult.publicUrl,
+        storagePath: storageResult.storagePath,
+        storageError: storageResult.error,
+        pdfBase64: pdfBuffer.toString('base64')
       });
     } catch (err: any) {
+      console.error("[generate-pdf error]:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -- SEND BUDGET / INVOICE EMAIL WITH NATIVE PDF ATTACHMENT & RESEND / NODEMAILER --
+  app.post(["/api/obraclima/send-email", "/api/obraclima/send-budget"], async (req: any, res: any) => {
+    try {
+      const { to, subject, body, doc, docId, type = 'presupuesto' } = req.body;
+      const targetDoc = doc || (type === 'factura' 
+        ? db.invoices.find(i => i.id === docId || i.number === docId)
+        : db.budgets.find(b => b.id === docId || b.number === docId));
+
+      if (!targetDoc) {
+        return res.status(404).json({ error: "Documento de presupuesto o factura no encontrado." });
+      }
+
+      const docNum = targetDoc.number || docId || 'documento';
+      const docTitle = type === 'factura' ? 'Factura' : 'Presupuesto';
+      const clientName = targetDoc.customer?.name || targetDoc.client?.name || 'Cliente';
+      const filename = `${docTitle}_${docNum.replace(/[\/\\]/g, '-')}_ObraClima.pdf`;
+
+      // 1. Obtener o generar texto de cortesía con Gemini si viene vacío
+      let emailBody = body;
+      if (!emailBody || typeof emailBody !== 'string' || emailBody.trim().length === 0) {
+        emailBody = await generateCourtesyTextWithGemini(targetDoc, type);
+      }
+
+      // 2. Generar el archivo PDF binario de forma nativa
+      const pdfBuffer = await generateBudgetPdfBuffer(targetDoc, type, db.config);
+
+      // 3. Guardar temporalmente en el Bucket de Supabase Storage
+      const storageResult = await uploadPdfToSupabaseStorage(pdfBuffer, filename);
+      if (storageResult.publicUrl) {
+        console.log(`[Supabase Storage] PDF ${filename} guardado temporalmente en: ${storageResult.publicUrl}`);
+      }
+
+      // 4. Construir lista de destinatarios
+      const clientEmail = targetDoc.customer?.email || targetDoc.client?.email;
+      let recipients: string[] = [];
+      if (Array.isArray(to) && to.length > 0) {
+        recipients = to.filter(Boolean);
+      } else if (typeof to === 'string' && to.trim()) {
+        recipients = to.split(',').map(e => e.trim()).filter(Boolean);
+      } else {
+        recipients = ['administracion@obraclima.com', 'ahorraai@gmail.com'];
+        if (clientEmail) recipients.unshift(clientEmail);
+      }
+
+      // 5. Asunto oficial
+      const emailSubject = subject || `${docTitle} Oficial Nº ${docNum} - ObraClima S.L. (${clientName})`;
+
+      // 6. Enviar correo con PDF adjunto de forma nativa utilizando Resend API (o Nodemailer)
+      const sendResult = await sendOfficialEmailWithNativePdfAttachment({
+        to: recipients,
+        subject: emailSubject,
+        body: emailBody,
+        pdfBuffer,
+        pdfFilename: filename,
+        docNumber: docNum,
+        type
+      });
+
+      return res.json({
+        success: sendResult.success,
+        message: sendResult.message,
+        provider: sendResult.provider,
+        id: sendResult.id,
+        storageUrl: storageResult.publicUrl,
+        storagePath: storageResult.storagePath,
+        filename,
+        recipients,
+        courtesyText: emailBody
+      });
+    } catch (err: any) {
+      console.error("[Email send error]:", err);
       return res.status(500).json({ error: err.message });
     }
   });

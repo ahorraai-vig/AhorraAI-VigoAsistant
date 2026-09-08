@@ -139,6 +139,7 @@ export default function BusinessPortal() {
       fetchRewards(data.business.id);
     } catch (err: any) {
       setError(err.message || 'Error al conectar');
+      sessionStorage.removeItem('coop_access_code');
     } finally {
       setLoading(false);
     }

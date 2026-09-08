@@ -12,6 +12,7 @@ import {
   convertBudgetToInvoice, 
   parseBudgetWithAi 
 } from './obraclima';
+import { setupObraClimaScraperRoutes, scrapeWooCommerceProduct, isDomainOrSitemapUrl, startBackgroundSitemapCrawling, CRAWLER_INICIADO_MSG } from './obraclima_scraper';
 import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService, weatherProvider } from '../server/services/vigo';
 import { 
   vigoAgentPlanner, 
@@ -69,6 +70,8 @@ function getBusinessAccessCodeFromReq(req: express.Request): string | null {
   if (Array.isArray(header) && header[0]?.trim()) return header[0].trim();
   const bodyCode = req.body?.access_code;
   if (typeof bodyCode === 'string' && bodyCode.trim()) return bodyCode.trim();
+  const queryCode = req.query?.access_code || req.query?.code;
+  if (typeof queryCode === 'string' && queryCode.trim()) return queryCode.trim();
   return null;
 }
 
@@ -127,7 +130,11 @@ async function requireBusinessByAccessCode(req: express.Request, res: express.Re
     res.status(404).json({ error: 'Negocio no encontrado.' });
     return null;
   }
-  if ((business.access_code || '').toUpperCase() !== code.toUpperCase()) {
+  const cleanCode = code.trim().toUpperCase();
+  const bizCode = (business.access_code || '').trim().toUpperCase();
+  const matchDirect = bizCode === cleanCode;
+  const matchNorm = bizCode.replace(/[\s\-_]/g, '') === cleanCode.replace(/[\s\-_]/g, '');
+  if (!matchDirect && !matchNorm) {
     res.status(403).json({ error: 'La clave de acceso no corresponde a este comercio.' });
     return null;
   }
@@ -468,6 +475,7 @@ async function generateAIResponse(formattedMessages: Array<{ role: string; conte
 
 const telegramChatMemory = new Map<number, Array<{ role: string; content: string }>>();
 const telegramChatModes = new Map<number, 'obraclima' | 'vigo'>();
+const pendingScrapeUrlChats = new Map<number, boolean>();
 
 function getAppBaseUrl(): string {
   return process.env.APP_URL || 'https://ais-dev-tvkcd5ffewortczttmdp2n-511583726387.europe-west2.run.app';
@@ -567,6 +575,9 @@ function getObraClimaInlineKeyboard() {
         { text: "🏢 Datos Empresa", callback_data: "oc_config" }
       ],
       [
+        { text: "Ingresar Producto por URL", callback_data: "oc_ingresar_url" }
+      ],
+      [
         { text: "🌊 Guía Turística de Vigo", callback_data: "vigo_mode" }
       ]
     ]
@@ -580,7 +591,8 @@ function getObraClimaReplyKeyboard() {
       [{ text: "🚀 Abrir MiniApp ObraClima", web_app: { url: `${appUrl}/obraclima-miniapp` } }],
       [{ text: "📋 Presupuestos" }, { text: "🧾 Facturas" }],
       [{ text: "⚡ Crear con IA" }, { text: "👥 Clientes" }],
-      [{ text: "📦 Catálogo" }, { text: "🌊 Modo Guía Vigo" }]
+      [{ text: "📦 Catálogo" }, { text: "Ingresar Producto por URL" }],
+      [{ text: "🌊 Modo Guía Vigo" }]
     ],
     resize_keyboard: true,
     is_persistent: true
@@ -772,6 +784,61 @@ _(Escribe /obraclima en cualquier momento para volver a ObraClima)._`;
       }
     });
     return;
+  }
+
+  // 6.5. Ingresar Producto por URL
+  if (
+    userText === 'Ingresar Producto por URL' || 
+    userText === '🔗 Ingresar Producto por URL' || 
+    userText === '/ingresar_producto_url' || 
+    userText.startsWith('/ingresar_producto_url ')
+  ) {
+    let directUrl = '';
+    if (userText.startsWith('/ingresar_producto_url ')) {
+      directUrl = userText.substring('/ingresar_producto_url '.length).trim();
+    }
+
+    if (directUrl && (directUrl.startsWith('http://') || directUrl.startsWith('https://'))) {
+      if (isDomainOrSitemapUrl(directUrl)) {
+        startBackgroundSitemapCrawling(directUrl);
+        await sendTelegramMessage(token, chatId, CRAWLER_INICIADO_MSG);
+        return;
+      }
+      await sendTelegramTyping(token, chatId);
+      try {
+        const result = await scrapeWooCommerceProduct(directUrl);
+        await sendTelegramMessage(token, chatId, result.formattedMessage);
+        return;
+      } catch (err: any) {
+        await sendTelegramMessage(token, chatId, `❌ Error: ${err.message}`);
+        return;
+      }
+    }
+
+    pendingScrapeUrlChats.set(chatId, true);
+    await sendTelegramMessage(token, chatId, "🔗 *Ingresar Producto por URL o Dominio*\n\nPor favor, introduce la URL del producto WooCommerce o el dominio de la tienda para rastreo masivo:");
+    return;
+  }
+
+  if (pendingScrapeUrlChats.get(chatId) && (userText.startsWith('http://') || userText.startsWith('https://') || userText.includes('.'))) {
+    pendingScrapeUrlChats.delete(chatId);
+    const candidate = userText.trim();
+
+    if (isDomainOrSitemapUrl(candidate)) {
+      startBackgroundSitemapCrawling(candidate);
+      await sendTelegramMessage(token, chatId, CRAWLER_INICIADO_MSG);
+      return;
+    }
+
+    await sendTelegramTyping(token, chatId);
+    try {
+      const result = await scrapeWooCommerceProduct(candidate);
+      await sendTelegramMessage(token, chatId, result.formattedMessage);
+      return;
+    } catch (err: any) {
+      await sendTelegramMessage(token, chatId, `❌ Error: ${err.message}`);
+      return;
+    }
   }
 
   // 7. Instrucciones para crear con IA
@@ -1016,6 +1083,13 @@ async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
         ]
       }
     });
+    return;
+  }
+
+  if (data === 'oc_ingresar_url') {
+    telegramChatModes.set(chatId, 'obraclima');
+    pendingScrapeUrlChats.set(chatId, true);
+    await sendTelegramMessage(token, chatId, "🔗 *Ingresar Producto por URL*\n\nPor favor, introduce la URL del producto WooCommerce:");
     return;
   }
 
@@ -2075,23 +2149,72 @@ const inMemoryCoopBusinesses: MemoryCoopBusiness[] = [];
 
 let inMemorySynergies: MemorySynergy[] = [];
 
-// Función para generar código de acceso único y robusto sin colisiones
-function generateBusinessAccessCode(name: string, zone?: string): string {
+// Función hash FNV-1a para generar números y sales deterministas basados en identificador
+function fnv1a(str: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+// Cachés en memoria para garantizar que el código de acceso nunca cambie entre refrescos o llamadas
+const memoryAccessCodeCache = new Map<string, string>(); // id o seed -> access_code
+const memoryCodeToBusinessId = new Map<string, string>(); // access_code normalizado -> id
+
+// Función para generar código de acceso único, robusto y 100% DETERMINISTA
+function generateBusinessAccessCode(name: string, zone?: string, id?: string): string {
   const prefix = "VIGO";
-  const randomNum = Math.floor(10000 + Math.random() * 90000);
   const cleanZone = (zone || name).replace(/[^a-zA-Z]/g, '').substring(0, 4).toUpperCase() || "COMM";
-  const salt = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `${prefix}-${randomNum}-${cleanZone}-${salt}`;
+  
+  // Usar el ID del negocio o combinación estable nombre+zona para que el hash sea inmutable
+  const seed = (id && String(id).trim()) 
+    ? String(id).trim() 
+    : `${name.trim().toLowerCase()}__${(zone || '').trim().toLowerCase()}`;
+    
+  const h1 = fnv1a(seed);
+  const h2 = fnv1a(seed + "_vigo_secure_salt_v4");
+  
+  const num = 10000 + (h1 % 90000);
+  const salt = (h2 % 1679616).toString(36).toUpperCase().padStart(4, '0').slice(-4);
+  return `${prefix}-${num}-${cleanZone}-${salt}`;
 }
 
 // Normalizador y enriquecedor para cualquier registro de negocio (Supabase o memoria)
 function normalizeAndEnrichDbBusiness(row: any): MemoryCoopBusiness {
+  const rowId = row.id ? String(row.id).trim() : '';
   const name = (row.name || 'Comercio Local').trim();
   const address = row.address || '';
   const description = row.description || '';
   const category = row.category || normalizeVigoCategory(row.type, name, description);
   const zone = row.zone || detectVigoZone(address, name);
-  const access_code = row.access_code || generateBusinessAccessCode(name, zone || address);
+  
+  // 1. Si ya viene con access_code en base de datos, usarlo
+  let access_code = (row.access_code && String(row.access_code).trim()) 
+    ? String(row.access_code).trim().toUpperCase() 
+    : '';
+  
+  // 2. Si no viene en BD, consultar caché por ID o por nombre
+  const nameKey = `name:${name.toLowerCase()}`;
+  if (!access_code && rowId && memoryAccessCodeCache.has(rowId)) {
+    access_code = memoryAccessCodeCache.get(rowId)!;
+  }
+  if (!access_code && memoryAccessCodeCache.has(nameKey)) {
+    access_code = memoryAccessCodeCache.get(nameKey)!;
+  }
+
+  // 3. Si no existe aún, generar código determinista e inmutable
+  if (!access_code) {
+    access_code = generateBusinessAccessCode(name, zone || address, rowId);
+  }
+
+  // Fijar en caché de forma permanente
+  if (rowId) memoryAccessCodeCache.set(rowId, access_code);
+  memoryAccessCodeCache.set(nameKey, access_code);
+  memoryCodeToBusinessId.set(access_code.toUpperCase(), rowId || nameKey);
+  memoryCodeToBusinessId.set(access_code.replace(/[\s\-_]/g, '').toUpperCase(), rowId || nameKey);
+
   const honesty_status = (row.honesty_status === 'DICHO' || row.honesty_status === 'OBSERVADO' || row.honesty_status === 'SIN_CONFIRMAR') 
     ? row.honesty_status 
     : 'OBSERVADO';
@@ -2152,8 +2275,16 @@ async function getAllUnifiedBusinesses(): Promise<MemoryCoopBusiness[]> {
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
+        const toPersist: { id: string; access_code: string }[] = [];
+
         for (const row of data) {
           const enriched = normalizeAndEnrichDbBusiness(row);
+
+          // Si el registro de la BD carece de clave, prepararlo para actualización
+          if ((!row.access_code || !String(row.access_code).trim()) && enriched.access_code && row.id) {
+            toPersist.push({ id: row.id, access_code: enriched.access_code });
+          }
+
           // Sobrescribir o añadir por ID o por coincidencia exacta de nombre
           const existingById = unifiedMap.get(enriched.id);
           if (existingById) {
@@ -2173,6 +2304,19 @@ async function getAllUnifiedBusinesses(): Promise<MemoryCoopBusiness[]> {
               unifiedMap.set(enriched.id, enriched);
             }
           }
+        }
+
+        // Auto-persistencia asíncrona en Supabase para fijar de forma permanente los access_code
+        if (toPersist.length > 0) {
+          (async () => {
+            try {
+              for (const item of toPersist.slice(0, 30)) {
+                await supabase.from('businesses').update({ access_code: item.access_code }).eq('id', item.id);
+              }
+            } catch (err: any) {
+              console.warn('[Auto-persist access_codes warning]:', err.message);
+            }
+          })();
         }
       }
     } catch (sbErr) {
@@ -2531,11 +2675,37 @@ app.post("/api/cooperation/login", async (req, res) => {
     }
 
     const cleanCode = access_code.trim().toUpperCase();
+    const normalizedInput = cleanCode.replace(/[\s\-_]/g, '');
     const allBusinesses = await getAllUnifiedBusinesses();
-    const business = allBusinesses.find(b => b.access_code.toUpperCase() === cleanCode);
+    
+    // 1. Búsqueda por coincidencia exacta o sin guiones/espacios
+    let business = allBusinesses.find(b => {
+      const bCode = (b.access_code || '').trim().toUpperCase();
+      if (bCode === cleanCode) return true;
+      if (bCode.replace(/[\s\-_]/g, '') === normalizedInput) return true;
+      return false;
+    });
+
+    // 2. Fallback por ID del comercio o código de embajador
+    if (!business) {
+      business = allBusinesses.find(b => {
+        if (b.id && String(b.id).trim().toUpperCase() === cleanCode) return true;
+        const refCode = `EMBAJADOR-${(b.access_code || '').split('-')[1] || ''}`.toUpperCase();
+        if (refCode && refCode === cleanCode) return true;
+        return false;
+      });
+    }
+
+    // 3. Fallback por mapa en memoria de códigos a ID
+    if (!business) {
+      const matchedKey = memoryCodeToBusinessId.get(cleanCode) || memoryCodeToBusinessId.get(normalizedInput);
+      if (matchedKey) {
+        business = allBusinesses.find(b => String(b.id) === matchedKey || `name:${b.name.toLowerCase()}` === matchedKey);
+      }
+    }
 
     if (!business) {
-      return res.status(404).json({ error: "No se encontró ningún negocio con esa clave de acceso. Verifica el código o regístrate." });
+      return res.status(404).json({ error: "No se encontró ningún negocio con esa clave de acceso. Verifica el código o cópialo desde el panel de administración." });
     }
 
     // Obtener sinergias específicas para este negocio
@@ -3255,4 +3425,5 @@ Devuelve SIEMPRE y ÚNICAMENTE un JSON con esta estructura (no incluyas markdown
 });
 
 setupObraClimaRoutes(app, requireAdmin);
+setupObraClimaScraperRoutes(app);
 export default app;
