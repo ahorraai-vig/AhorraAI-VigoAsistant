@@ -89,11 +89,13 @@ export default function BusinessPortal() {
   // Cargar lista completa de comercios de la red para el buscador de aliados
   useEffect(() => {
     fetch('/api/cooperation/all')
-      .then(res => res.json())
+      .then(res => res.ok ? res.json() : null)
       .then(data => {
-        setAllNetworkBusinesses(data.businesses || []);
+        if (data?.businesses) {
+          setAllNetworkBusinesses(data.businesses);
+        }
       })
-      .catch(console.error);
+      .catch(err => console.warn("Notice loading network businesses:", err?.message || err));
   }, []);
 
   // Login automático si viene en URL o en sessionStorage

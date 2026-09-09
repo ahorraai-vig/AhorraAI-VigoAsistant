@@ -1,5 +1,6 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { GoogleGenAI } from '@google/genai';
+import { isGeminiAvailable, handleGeminiError } from './geminiBreaker';
 import { sendOfficialEmailWithNativePdfAttachment } from './obraclima_pdf_mailer';
 
 export interface TelegramMiniAppProposal {
@@ -73,7 +74,7 @@ export async function generateProposalContent(
   const apiKey = process.env.GEMINI_API_KEY;
   let aiProposal: any = null;
 
-  if (apiKey) {
+  if (apiKey && isGeminiAvailable()) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Actúa como Consultor Senior de Transformación Digital B2B para pymes y autónomos en Galicia (provincia de Pontevedra).
@@ -119,7 +120,7 @@ INSTRUCCIONES:
   "emailBody": "Cuerpo del correo completo y profesional..."
 }`;
 
-      for (const modelName of ['gemini-3.8-flash', 'gemini-3.6-flash']) {
+      for (const modelName of ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest']) {
         try {
           const response = await ai.models.generateContent({
             model: modelName,
@@ -131,8 +132,40 @@ INSTRUCCIONES:
             aiProposal = JSON.parse(cleaned);
             break;
           }
-        } catch {
-          // probar siguiente modelo
+        } catch (mErr) {
+          const { shouldBreak } = handleGeminiError(mErr, modelName);
+          if (shouldBreak) break;
+        }
+      }
+
+      // Fallback con Groq si Gemini falla
+      if (!aiProposal && process.env.GROQ_API_KEY) {
+        for (const groqModel of ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "groq/compound", "qwen/qwen3.8-27b"]) {
+          try {
+            const gRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                model: groqModel,
+                messages: [{ role: "user", content: prompt }],
+                response_format: { type: "json_object" }
+              })
+            });
+            if (gRes.ok) {
+              const gData = await gRes.json();
+              const c = gData.choices?.[0]?.message?.content;
+              if (c) {
+                const cleaned = c.replace(/```json/g, '').replace(/```/g, '').trim();
+                aiProposal = JSON.parse(cleaned);
+                break;
+              }
+            }
+          } catch {
+            // probar siguiente
+          }
         }
       }
     } catch (err: any) {

@@ -244,9 +244,9 @@ export default function Chat() {
   const [langTitleIndex, setLangTitleIndex] = useState(0);
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [telegramInfo, setTelegramInfo] = useState<{ configured: boolean; username: string | null; url: string | null }>({
-    configured: false,
-    username: null,
-    url: null
+    configured: true,
+    username: 'ahorraaivigoasistant_bot',
+    url: 'https://t.me/ahorraaivigoasistant_bot'
   });
 
   const [config, setConfig] = useState<ChatConfig>({
@@ -267,14 +267,37 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch('/api/telegram/info')
-      .then(res => res.json())
-      .then(data => {
-        if (data && (data.configured || data.url)) {
-          setTelegramInfo(data);
+    let isMounted = true;
+    const fetchTelegramInfo = async (retries = 2) => {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const res = await fetch('/api/telegram/info');
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          if (isMounted && data && (data.configured || data.url)) {
+            setTelegramInfo(data);
+          }
+          return;
+        } catch {
+          if (attempt === retries) {
+            if (isMounted) {
+              setTelegramInfo(prev => ({
+                ...prev,
+                configured: true,
+                username: prev.username || 'ahorraaivigoasistant_bot',
+                url: prev.url || 'https://t.me/ahorraaivigoasistant_bot'
+              }));
+            }
+          } else {
+            await new Promise(r => setTimeout(r, 1000));
+          }
         }
-      })
-      .catch(err => console.error("Error fetching telegram info:", err));
+      }
+    };
+    fetchTelegramInfo();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {

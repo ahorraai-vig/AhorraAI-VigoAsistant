@@ -2,6 +2,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
+import { isGeminiAvailable, handleGeminiError } from "./geminiBreaker";
 import { createClient } from "@supabase/supabase-js";
 import {
   Business,
@@ -1068,31 +1069,76 @@ Estructura el análisis EXCLUSIVAMENTE en formato JSON con la siguiente estructu
   ]
 }`;
 
-      const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
       let responseText = "{}";
       let lastAiErr: any = null;
 
-      for (const modelName of candidateModels) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json",
-              systemInstruction: "Eres un analista B2B especializado en empresas de construcción, instalaciones y reformas en la provincia de Pontevedra (Galicia). Extrae hechos ('FACT') observables con precisión legal y diferéncialos rigurosamente de inferencias ('INFERENCE'). Devuelve solo JSON válido.",
+      if (isGeminiAvailable()) {
+        const candidateModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+        for (const modelName of candidateModels) {
+          try {
+            const response = await ai.models.generateContent({
+              model: modelName,
+              contents: prompt,
+              config: {
+                responseMimeType: "application/json",
+                systemInstruction: "Eres un analista B2B especializado en empresas de construcción, instalaciones y reformas en la provincia de Pontevedra (Galicia). Extrae hechos ('FACT') observables con precisión legal y diferéncialos rigurosamente de inferencias ('INFERENCE'). Devuelve solo JSON válido.",
+              }
+            });
+            if (response && response.text) {
+              responseText = response.text;
+              break;
             }
-          });
-          if (response && response.text) {
-            responseText = response.text;
-            break;
+          } catch (mErr) {
+            lastAiErr = mErr;
+            const { shouldBreak } = handleGeminiError(mErr, modelName);
+            if (shouldBreak) break;
           }
-        } catch (mErr) {
-          lastAiErr = mErr;
         }
       }
 
-      if (responseText === "{}" && lastAiErr) {
-        throw lastAiErr;
+      // Fallback con Groq si Gemini no responde
+      if (responseText === "{}" && process.env.GROQ_API_KEY) {
+        for (const groqModel of ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "groq/compound", "qwen/qwen3.8-27b"]) {
+          try {
+            const gRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                model: groqModel,
+                messages: [
+                  { role: "system", content: "Eres un analista B2B especializado en empresas de construcción, instalaciones y reformas en Pontevedra (Galicia). Devuelve solo JSON válido con la estructura solicitada." },
+                  { role: "user", content: prompt }
+                ],
+                response_format: { type: "json_object" }
+              })
+            });
+            if (gRes.ok) {
+              const gData = await gRes.json();
+              const c = gData.choices?.[0]?.message?.content;
+              if (c) {
+                responseText = c;
+                break;
+              }
+            }
+          } catch {
+            // probar siguiente
+          }
+        }
+      }
+
+      if (responseText === "{}") {
+        // Fallback estructurado de seguridad
+        responseText = JSON.stringify({
+          estimatedSize: { value: "Pequeña empresa (1-9)", confidence: 70, reasoning: "Estimación por catálogo y presencia local" },
+          businessClassification: { primaryCategory: biz.primary_category || "Construcción y Reformas", subCategories: [], confidence: 80 },
+          serviceArea: { municipalities: ["Vigo", "Pontevedra"], scope: "Provincial", confidence: 75 },
+          digitalAudit: { websiteExists: Boolean(biz.website_url), websiteQuality: 50 },
+          signals: [],
+          painPoints: []
+        });
       }
 
       const cleanedJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();

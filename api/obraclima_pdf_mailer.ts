@@ -1,5 +1,6 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { GoogleGenAI } from '@google/genai';
+import { isGeminiAvailable, handleGeminiError } from './geminiBreaker';
 import { Resend } from 'resend';
 import nodemailer from 'nodemailer';
 import { getSupabaseClient } from './obraclima';
@@ -515,7 +516,7 @@ export async function generateCourtesyTextWithGemini(
     .join(', ');
 
   const apiKey = process.env.GEMINI_API_KEY;
-  if (apiKey) {
+  if (apiKey && isGeminiAvailable()) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Actúa como el Responsable de Administración y Clientes de "ObraClima S.L.", empresa especializada en climatización, calefacción y reformas en Vigo.
@@ -538,7 +539,7 @@ Instrucciones estrictas:
 5. Firma formalmente como el Departamento de Administración y Climatización de ObraClima S.L.
 6. NO devuelvas asunto, cabeceras ni bloques Markdown extra, devuelve directamente el cuerpo del mensaje listo para enviar.`;
 
-      const candidateModels = ['gemini-3.8-flash', 'gemini-3.6-flash'];
+      const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
       for (const modelName of candidateModels) {
         try {
           const response = await ai.models.generateContent({
@@ -549,12 +550,47 @@ Instrucciones estrictas:
           if (text && text.length > 50) {
             return text;
           }
-        } catch {
-          // probar siguiente modelo
+        } catch (mErr) {
+          const { shouldBreak } = handleGeminiError(mErr, modelName);
+          if (shouldBreak) break;
         }
       }
-    } catch (err: any) {
-      console.warn('[Gemini Courtesy Text Notice]:', err.message);
+    } catch {
+      // Continuar silenciosamente al fallback
+    }
+  }
+
+  // 2. Fallback con Groq si está disponible
+  if (process.env.GROQ_API_KEY) {
+    const groqCandidateModels = [
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b",
+      "groq/compound",
+      "qwen/qwen3.8-27b",
+      "llama-3.3-70b-versatile"
+    ];
+    for (const model of groqCandidateModels) {
+      try {
+        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.5
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.choices?.[0]?.message?.content?.trim();
+          if (text && text.length > 50) return text;
+        }
+      } catch {
+        // probar siguiente modelo
+      }
     }
   }
 

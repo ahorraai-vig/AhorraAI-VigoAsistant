@@ -57,9 +57,9 @@ export default function AdminConfig() {
 
   useEffect(() => {
     fetch('/api/config/status')
-      .then(res => res.json())
-      .then(data => setConfigStatus(data))
-      .catch(err => console.error("Error fetching config status", err));
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (data) setConfigStatus(data); })
+      .catch(err => console.warn("Notice fetching config status:", err?.message || err));
   }, []);
 
   const handleTestSerpApi = async () => {

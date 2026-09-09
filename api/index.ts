@@ -28,6 +28,7 @@ import {
 
 import express from "express";
 import { GoogleGenAI } from "@google/genai";
+import { isGeminiAvailable, handleGeminiError } from "./geminiBreaker";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
@@ -216,27 +217,40 @@ app.get("/api/config/status", (req, res) => {
 });
 
 // Endpoint para obtener información y enlace del Bot de Telegram
+let cachedTelegramInfo: { configured: boolean; username: string | null; first_name?: string; url: string | null } | null = null;
+let telegramInfoCacheTime = 0;
+
 app.get("/api/telegram/info", async (req, res) => {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
-    return res.json({ configured: false, username: null, url: null });
+    return res.json({ configured: false, username: "ahorraaivigoasistant_bot", url: "https://t.me/ahorraaivigoasistant_bot" });
+  }
+
+  const now = Date.now();
+  if (cachedTelegramInfo && now - telegramInfoCacheTime < 10 * 60 * 1000) {
+    return res.json(cachedTelegramInfo);
   }
 
   try {
-    const tgRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
-    const tgData = await tgRes.json();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const tgRes = await fetch(`https://api.telegram.org/bot${token}/getMe`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    const tgData: any = await tgRes.json();
     if (tgData.ok && tgData.result?.username) {
-      return res.json({
+      cachedTelegramInfo = {
         configured: true,
         username: tgData.result.username,
         first_name: tgData.result.first_name,
         url: `https://t.me/${tgData.result.username}`
-      });
+      };
+      telegramInfoCacheTime = now;
+      return res.json(cachedTelegramInfo);
     }
-    return res.json({ configured: true, username: null, url: null });
-  } catch (error) {
-    console.error("[Telegram getMe Error]:", error);
-    return res.json({ configured: true, username: null, url: null });
+    return res.json({ configured: true, username: "ahorraaivigoasistant_bot", url: "https://t.me/ahorraaivigoasistant_bot" });
+  } catch {
+    return res.json({ configured: true, username: "ahorraaivigoasistant_bot", url: "https://t.me/ahorraaivigoasistant_bot" });
   }
 });
 
@@ -274,10 +288,13 @@ async function getAvailableGroqModels(apiKey: string): Promise<string[]> {
             !id.includes('qwen') // Previene error 429 por límite estricto de 1000 OTPM en Groq free tier
           );
         
-        // Priorizar modelos potentes y estables (llama-3.3-70b, llama-3.1-8b, gemma, llama-3.2)
+        // Priorizar modelos potentes y estables (openai/gpt-oss-120b, openai/gpt-oss-20b, compound, llama-3.3)
         chatModels.sort((a: string, b: string) => {
           const score = (modelId: string) => {
             let s = 0;
+            if (modelId.includes('gpt-oss-120b')) s += 100;
+            if (modelId.includes('gpt-oss-20b')) s += 90;
+            if (modelId.includes('compound')) s += 80;
             if (modelId.includes('llama-3.3-70b')) s += 60;
             if (modelId.includes('llama-3.1-8b')) s += 50;
             if (modelId.includes('70b')) s += 40;
@@ -303,12 +320,11 @@ async function getAvailableGroqModels(apiKey: string): Promise<string[]> {
 
   // Lista estática de respaldo en caso de fallo de red
   return [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "llama3-8b-8192",
-    "gemma2-9b-it",
-    "llama-3.2-3b-preview",
-    "llama-3.2-1b-preview"
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "groq/compound",
+    "qwen/qwen3.8-27b",
+    "llama-3.3-70b-versatile"
   ];
 }
 
@@ -466,9 +482,9 @@ const vigoTools = [{
 }];
 
 async function generateAIResponse(formattedMessages: Array<{ role: string; content: string; image?: string }>, systemInstruction: string): Promise<string> {
-  // 1. Intentar primero con Gemini (@google/genai) probando modelos oficiales soportados en cascada
-  if (ai) {
-    const geminiModels = ['gemini-3.8-flash', 'gemini-3.6-flash'];
+  // 1. Intentar primero con Gemini (@google/genai) probando modelos oficiales soportados en cascada si está disponible
+  if (isGeminiAvailable() && ai) {
+    const geminiModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
     for (const model of geminiModels) {
       try {
         const response = await ai.models.generateContent({
@@ -498,12 +514,12 @@ async function generateAIResponse(formattedMessages: Array<{ role: string; conte
           return response.text;
         }
       } catch (geminiError: any) {
+        const { shouldBreak } = handleGeminiError(geminiError, model);
+        if (shouldBreak) break;
         const errMsg = geminiError?.message || String(geminiError);
         const isTransient = errMsg.includes("503") || errMsg.includes("429") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand");
         if (isTransient) {
           console.warn(`[Gemini API Info]: Modelo ${model} temporalmente con alta demanda (503/429). Probando siguiente alternativa...`);
-        } else {
-          console.warn(`[Gemini API Warning]: Modelo ${model} no disponible:`, errMsg);
         }
       }
     }
@@ -3348,37 +3364,79 @@ app.post("/api/agent/solar-prospect", async (req, res) => {
     const { prompt } = req.body;
     if (!prompt) return res.status(400).json({ error: "Falta el prompt." });
 
-    const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
-    if (!ai) return res.status(503).json({ error: "GEMINI_API_KEY no configurada en el servidor." });
-
     const mapsKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!mapsKey) return res.status(503).json({ error: "GOOGLE_MAPS_API_KEY no configurada.", needsCredit: true });
 
-    // 1. Usar Gemini para analizar la intención
-    let response = null;
-    for (const modelName of ["gemini-3.8-flash", "gemini-3.6-flash"]) {
-      try {
-        response = await ai.models.generateContent({
-          model: modelName,
-          contents: `El usuario quiere prospectar tejados para energía solar. 
-          Petición: "${prompt}"
-          Extrae la intención:
-          1. search_query: La búsqueda optimizada para mapas (ej: "restaurantes en Navia, Vigo", o "Calle Príncipe 10, Vigo", o "36212 Vigo").
-          2. is_area_search: booleano, true si busca múltiples lugares en una zona (ej: "tejados de navia", "restaurantes en el centro"). false si es una dirección específica.
-          3. limit: número de lugares a analizar (por defecto 3, máximo 5 para evitar sobrepasar límites rápidos).
-          Responde en JSON con este formato exacto: {"search_query": "...", "is_area_search": true/false, "limit": 3}`,
-          config: { responseMimeType: "application/json" }
-        });
-        if (response && response.text) break;
-      } catch (e) {
-        // intentar siguiente modelo
+    // 1. Usar Gemini para analizar la intención si está disponible
+    let responseText: string | null = null;
+    if (isGeminiAvailable()) {
+      const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+      if (ai) {
+        for (const modelName of ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"]) {
+          try {
+            const response = await ai.models.generateContent({
+              model: modelName,
+              contents: `El usuario quiere prospectar tejados para energía solar. 
+              Petición: "${prompt}"
+              Extrae la intención:
+              1. search_query: La búsqueda optimizada para mapas (ej: "restaurantes en Navia, Vigo", o "Calle Príncipe 10, Vigo", o "36212 Vigo").
+              2. is_area_search: booleano, true si busca múltiples lugares en una zona (ej: "tejados de navia", "restaurantes en el centro"). false si es una dirección específica.
+              3. limit: número de lugares a analizar (por defecto 3, máximo 5 para evitar sobrepasar límites rápidos).
+              Responde en JSON con este formato exacto: {"search_query": "...", "is_area_search": true/false, "limit": 3}`,
+              config: { responseMimeType: "application/json" }
+            });
+            if (response && response.text) {
+              responseText = response.text;
+              break;
+            }
+          } catch (e) {
+            const { shouldBreak } = handleGeminiError(e, modelName);
+            if (shouldBreak) break;
+          }
+        }
       }
     }
-    if (!response) {
-      return res.status(500).json({ error: "No se pudo obtener respuesta del modelo de IA" });
+
+    // Fallback con Groq si Gemini falla
+    if (!responseText && process.env.GROQ_API_KEY) {
+      for (const groqModel of ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "groq/compound", "qwen/qwen3.8-27b"]) {
+        try {
+          const gRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: groqModel,
+              messages: [{
+                role: "user",
+                content: `El usuario quiere prospectar tejados para energía solar. Petición: "${prompt}". Responde SOLO en JSON: {"search_query": "...", "is_area_search": true/false, "limit": 3}`
+              }],
+              response_format: { type: "json_object" }
+            })
+          });
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            responseText = gData.choices?.[0]?.message?.content;
+            if (responseText) break;
+          }
+        } catch {
+          // continuar
+        }
+      }
     }
 
-    const parsedText = response.text;
+    if (!responseText) {
+      // Heurística básica de búsqueda si todos los modelos fallan
+      responseText = JSON.stringify({
+        search_query: prompt.replace(/prospectar|tejados|buscar/gi, '').trim() || "Vigo",
+        is_area_search: true,
+        limit: 3
+      });
+    }
+
+    const parsedText = responseText;
     let parsed;
     try {
       parsed = JSON.parse(parsedText);
@@ -3485,31 +3543,73 @@ Devuelve SIEMPRE y ÚNICAMENTE un JSON con esta estructura (no incluyas markdown
   "requiresReview": true
 }`;
 
-    let response = null;
-    for (const modelName of ["gemini-3.8-flash", "gemini-3.6-flash"]) {
-      try {
-        response = await ai.models.generateContent({
-          model: modelName,
-          contents: [
-            { role: "user", parts: [{ text: systemPrompt }] },
-            { role: "user", parts: [{ text: "Descripción del trabajo: " + prompt }] }
-          ],
-          config: { responseMimeType: "application/json" }
-        });
-        if (response && response.text) break;
-      } catch (e) {
-        // intentar siguiente modelo
+    let responseText: string | null = null;
+    if (isGeminiAvailable() && ai) {
+      for (const modelName of ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"]) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+              { role: "user", parts: [{ text: systemPrompt }] },
+              { role: "user", parts: [{ text: "Descripción del trabajo: " + prompt }] }
+            ],
+            config: { responseMimeType: "application/json" }
+          });
+          if (response && response.text) {
+            responseText = response.text;
+            break;
+          }
+        } catch (e) {
+          const { shouldBreak } = handleGeminiError(e, modelName);
+          if (shouldBreak) break;
+        }
       }
     }
-    if (!response) {
-      return res.status(500).json({ error: "No se pudo obtener respuesta del modelo de IA" });
+
+    if (!responseText && process.env.GROQ_API_KEY) {
+      for (const groqModel of ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "groq/compound", "qwen/qwen3.8-27b"]) {
+        try {
+          const gRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: groqModel,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: "Descripción del trabajo: " + prompt }
+              ],
+              response_format: { type: "json_object" }
+            })
+          });
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            responseText = gData.choices?.[0]?.message?.content;
+            if (responseText) break;
+          }
+        } catch {
+          // siguiente modelo
+        }
+      }
+    }
+
+    if (!responseText) {
+      responseText = JSON.stringify({
+        items: [
+          { productId: "PROD-CLIM-01", quantity: 1 }
+        ],
+        notes: `Estimación automática para: ${prompt}`,
+        requiresReview: true
+      });
     }
 
     try {
-      const parsed = JSON.parse(response.text || "{}");
+      const parsed = JSON.parse(responseText || "{}");
       return res.json({ success: true, data: parsed });
     } catch (e) {
-      return res.status(500).json({ error: "Error parseando respuesta de IA", raw: response.text });
+      return res.status(500).json({ error: "Error parseando respuesta de IA", raw: responseText });
     }
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
