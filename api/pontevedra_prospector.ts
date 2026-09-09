@@ -30,6 +30,8 @@ import {
   generateProposalPdfBuffer,
   sendProposalEmailNative
 } from "./prospector_telegram_proposal";
+import { LeadMiniAppConfig, LeadWebsitePrototype } from "./prospector_miniapp_types";
+import { generateMiniAppForLead, generateWebsitePrototypeForLead } from "./prospector_miniapp_generator";
 
 // Directorio de persistencia local
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -47,6 +49,9 @@ interface ProspectorDatabase {
   searchRuns: SearchRun[];
   rgpdExclusions: Record<string, { phone?: string; name?: string; optedOutAt: string; reason: string }>;
   proposals: Record<string, TelegramMiniAppProposal>;
+  miniApps: Record<string, LeadMiniAppConfig>;
+  websitePrototypes: Record<string, LeadWebsitePrototype>;
+  leadBudgets: Record<string, any[]>;
 }
 
 let db: ProspectorDatabase = {
@@ -61,6 +66,9 @@ let db: ProspectorDatabase = {
   searchRuns: [],
   rgpdExclusions: {},
   proposals: {},
+  miniApps: {},
+  websitePrototypes: {},
+  leadBudgets: {},
 };
 
 // Cliente de Supabase para volcado y sincronización bidireccional
@@ -117,6 +125,9 @@ function loadDatabase() {
         leadStatus: cleanLeadStatus,
         outreach: cleanOutreach,
         proposals: parsed.proposals || {},
+        miniApps: parsed.miniApps || {},
+        websitePrototypes: parsed.websitePrototypes || {},
+        leadBudgets: parsed.leadBudgets || {},
         searchRuns: parsed.searchRuns || [],
         rgpdExclusions: parsed.rgpdExclusions || {},
       };
@@ -422,6 +433,9 @@ export function setupPontevedraProspectorRoutes(
       const scoreHistory = db.scoreHistory[id] || [];
       const leadStatus = db.leadStatus[id] || { status: "NEW", priority: "NORMAL", updated_at: business.created_at };
       const outreachLogs = db.outreach[id] || [];
+      const proposal = db.proposals?.[id] || null;
+      const miniApp = db.miniApps?.[id] || null;
+      const websitePrototype = db.websitePrototypes?.[id] || null;
 
       return res.json({
         success: true,
@@ -434,6 +448,9 @@ export function setupPontevedraProspectorRoutes(
           scoreHistory,
           leadStatus,
           outreachLogs,
+          proposal,
+          miniApp,
+          websitePrototype,
           rgpdCompliance: {
             legalBasis: business.rgpd_legal_basis || "Art. 19 LOPDGDD / Art. 6.1.f RGPD - Interés Legítimo B2B",
             source: business.rgpd_source || "Google Maps (Perfil comercial público)",
@@ -1939,4 +1956,426 @@ Estructura el análisis EXCLUSIVAMENTE en formato JSON con la siguiente estructu
       return res.status(500).json({ error: err.message || "Error al enviar correo" });
     }
   });
+
+  // 19. GENERAR MINIAPP PERSONALIZADA PARA TELEGRAM (INDIVIDUAL Y PRIVADA)
+  app.post("/api/pontevedra-prospector/leads/:id/generate-miniapp", async (req, res) => {
+    const isAdmin = await requireAdmin(req, res);
+    if (!isAdmin) return;
+
+    try {
+      const { id } = req.params;
+      const business = db.businesses[id];
+      if (!business) {
+        return res.status(404).json({ error: "Lead no encontrado" });
+      }
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const miniappConfig = await generateMiniAppForLead(business, baseUrl);
+
+      if (!db.miniApps) db.miniApps = {};
+      db.miniApps[id] = miniappConfig;
+
+      // Actualizar estado del lead a PROPOSAL si está en NEW o CONTACTED
+      if (db.leadStatus[id]?.status === "NEW" || db.leadStatus[id]?.status === "CONTACTED") {
+        db.leadStatus[id] = {
+          ...db.leadStatus[id],
+          status: "PROPOSAL",
+          updated_at: new Date().toISOString()
+        };
+      }
+
+      saveDatabase();
+
+      return res.json({
+        success: true,
+        data: miniappConfig
+      });
+    } catch (err: any) {
+      console.error("Error generando MiniApp:", err);
+      return res.status(500).json({ error: err.message || "Error generando MiniApp" });
+    }
+  });
+
+  // 20. OBTENER CONFIGURACIÓN DE MINIAPP GUARDADA DE UN LEAD (ADMIN)
+  app.get("/api/pontevedra-prospector/leads/:id/miniapp", async (req, res) => {
+    const isAdmin = await requireAdmin(req, res);
+    if (!isAdmin) return;
+
+    try {
+      const { id } = req.params;
+      const config = db.miniApps?.[id];
+      if (!config) {
+        return res.status(404).json({ error: "MiniApp no generada para este lead" });
+      }
+      return res.json({ success: true, data: config });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 21. GENERAR PROTOTIPO WEB EXCLUSIVO PARA LEADS SIN PÁGINA WEB (A DEMANDA)
+  app.post("/api/pontevedra-prospector/leads/:id/generate-website-prototype", async (req, res) => {
+    const isAdmin = await requireAdmin(req, res);
+    if (!isAdmin) return;
+
+    try {
+      const { id } = req.params;
+      const business = db.businesses[id];
+      if (!business) {
+        return res.status(404).json({ error: "Lead no encontrado" });
+      }
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      let miniApp = db.miniApps?.[id];
+      if (!miniApp) {
+        miniApp = await generateMiniAppForLead(business, baseUrl);
+        if (!db.miniApps) db.miniApps = {};
+        db.miniApps[id] = miniApp;
+      }
+
+      const prototype = await generateWebsitePrototypeForLead(business, miniApp, baseUrl);
+
+      if (!db.websitePrototypes) db.websitePrototypes = {};
+      db.websitePrototypes[id] = prototype;
+      saveDatabase();
+
+      return res.json({
+        success: true,
+        data: prototype,
+        miniApp: miniApp
+      });
+    } catch (err: any) {
+      console.error("Error generando prototipo web:", err);
+      return res.status(500).json({ error: err.message || "Error generando prototipo web" });
+    }
+  });
+
+  // 22. OBTENER PROTOTIPO WEB GUARDADO (ADMIN)
+  app.get("/api/pontevedra-prospector/leads/:id/website-prototype", async (req, res) => {
+    const isAdmin = await requireAdmin(req, res);
+    if (!isAdmin) return;
+
+    try {
+      const { id } = req.params;
+      const prototype = db.websitePrototypes?.[id];
+      if (!prototype) {
+        return res.status(404).json({ error: "Prototipo web no generado para este lead" });
+      }
+      return res.json({ success: true, data: prototype });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 23. GUARDAR PROPUESTA COMERCIAL EXPLICITAMENTE
+  app.post("/api/pontevedra-prospector/leads/:id/save-proposal", async (req, res) => {
+    const isAdmin = await requireAdmin(req, res);
+    if (!isAdmin) return;
+
+    try {
+      const { id } = req.params;
+      const business = db.businesses[id];
+      if (!business) {
+        return res.status(404).json({ error: "Lead no encontrado" });
+      }
+
+      const { proposal, miniApp, websitePrototype, notes } = req.body || {};
+
+      if (proposal) {
+        if (!db.proposals) db.proposals = {};
+        db.proposals[id] = { ...db.proposals[id], ...proposal, savedAt: new Date().toISOString() };
+      }
+      if (miniApp) {
+        if (!db.miniApps) db.miniApps = {};
+        db.miniApps[id] = { ...db.miniApps[id], ...miniApp };
+      }
+      if (websitePrototype) {
+        if (!db.websitePrototypes) db.websitePrototypes = {};
+        db.websitePrototypes[id] = { ...db.websitePrototypes[id], ...websitePrototype };
+      }
+
+      // Actualizar estado del lead a PROPOSAL si estaba en NEW o CONTACTED
+      if (db.leadStatus[id]?.status === "NEW" || db.leadStatus[id]?.status === "CONTACTED") {
+        db.leadStatus[id] = {
+          ...db.leadStatus[id],
+          status: "PROPOSAL",
+          updated_at: new Date().toISOString()
+        };
+      }
+
+      // Registrar en el CRM
+      if (!db.outreach[id]) db.outreach[id] = [];
+      const newLog: Outreach = {
+        id: `outreach-${Date.now()}`,
+        business_id: id,
+        channel: "EMAIL",
+        action: "Propuesta Comercial Guardada",
+        contacted_at: new Date().toISOString(),
+        outcome: "PROPOSAL_REQUESTED",
+        notes: notes || `Propuesta comercial, MiniApp Telegram y Prototipo Web guardados formalmente en la ficha de ${business.name}.`,
+        created_at: new Date().toISOString(),
+      };
+      db.outreach[id].unshift(newLog);
+
+      saveDatabase();
+
+      return res.json({
+        success: true,
+        message: "Propuesta guardada correctamente",
+        data: {
+          proposal: db.proposals?.[id],
+          miniApp: db.miniApps?.[id],
+          websitePrototype: db.websitePrototypes?.[id],
+          leadStatus: db.leadStatus[id]?.status,
+          outreachLog: newLog,
+          savedAt: new Date().toISOString()
+        }
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 24. DESPLEGAR EN TELEGRAM AL ACEPTAR CLIENTE
+  app.post("/api/pontevedra-prospector/leads/:id/deploy-to-telegram", async (req, res) => {
+    const isAdmin = await requireAdmin(req, res);
+    if (!isAdmin) return;
+
+    try {
+      const { id } = req.params;
+      const business = db.businesses[id];
+      if (!business) {
+        return res.status(404).json({ error: "Lead no encontrado" });
+      }
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      let miniApp = db.miniApps?.[id];
+      if (!miniApp) {
+        miniApp = await generateMiniAppForLead(business, baseUrl);
+        if (!db.miniApps) db.miniApps = {};
+        db.miniApps[id] = miniApp;
+      }
+
+      // Marcar despliegue oficial en Telegram
+      miniApp.isDeployedToTelegram = true;
+      miniApp.deployedAt = new Date().toISOString();
+      miniApp.deploymentStatus = "ACTIVE";
+      db.miniApps[id] = miniApp;
+
+      if (db.websitePrototypes?.[id]) {
+        db.websitePrototypes[id].isDeployedToTelegram = true;
+        db.websitePrototypes[id].deployedAt = new Date().toISOString();
+      }
+
+      // Marcar estado del lead como CUSTOMER (Cliente Ganado y Desplegado)
+      db.leadStatus[id] = {
+        ...db.leadStatus[id],
+        status: "CUSTOMER",
+        priority: "HIGH",
+        updated_at: new Date().toISOString()
+      };
+
+      // Registro oficial en CRM
+      if (!db.outreach[id]) db.outreach[id] = [];
+      const newLog: Outreach = {
+        id: `outreach-${Date.now()}`,
+        business_id: id,
+        channel: "OTHER",
+        action: "Despliegue Oficial en Telegram Bot",
+        contacted_at: new Date().toISOString(),
+        outcome: "CUSTOMER",
+        notes: `🎉 ¡Cliente ${business.name} aceptó la propuesta! MiniApp desplegada y 100% activa en @ahorraaivigoasistant_bot con código PIN ${miniApp.accessCode}. Enlace directo: https://t.me/ahorraaivigoasistant_bot?start=lead_${id}`,
+        created_at: new Date().toISOString(),
+      };
+      db.outreach[id].unshift(newLog);
+
+      saveDatabase();
+
+      return res.json({
+        success: true,
+        message: "MiniApp desplegada con éxito en Telegram",
+        data: {
+          miniApp,
+          websitePrototype: db.websitePrototypes?.[id],
+          leadStatus: db.leadStatus[id],
+          telegramStartUrl: `https://t.me/ahorraaivigoasistant_bot?start=lead_${id}`,
+          accessCode: miniApp.accessCode,
+          outreachLog: newLog,
+          deployedAt: miniApp.deployedAt
+        }
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 25. REVERTIR DESPLIEGUE EN TELEGRAM (BORRADOR)
+  app.post("/api/pontevedra-prospector/leads/:id/undeploy-telegram", async (req, res) => {
+    const isAdmin = await requireAdmin(req, res);
+    if (!isAdmin) return;
+
+    try {
+      const { id } = req.params;
+      if (db.miniApps?.[id]) {
+        db.miniApps[id].isDeployedToTelegram = false;
+        db.miniApps[id].deploymentStatus = "DRAFT";
+      }
+      if (db.websitePrototypes?.[id]) {
+        db.websitePrototypes[id].isDeployedToTelegram = false;
+      }
+      saveDatabase();
+      return res.json({ success: true, message: "Despliegue revertido a borrador" });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 23. RUNTIME PÚBLICO / CLIENTE DE LA MINIAPP (CON VERIFICACIÓN DE TOKEN O CÓDIGO)
+  app.get("/api/miniapp/lead/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const token = req.query.token as string | undefined;
+      const code = req.query.code as string | undefined;
+
+      const business = db.businesses[id];
+      if (!business) {
+        return res.status(404).json({ error: "Empresa no encontrada" });
+      }
+
+      let config = db.miniApps?.[id];
+      if (!config) {
+        // Generar configuración inicial sobre la marcha si aún no existe
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        config = await generateMiniAppForLead(business, baseUrl);
+        if (!db.miniApps) db.miniApps = {};
+        db.miniApps[id] = config;
+        saveDatabase();
+      }
+
+      // Validar acceso: el usuario debe proporcionar el token correcto o el código de acceso,
+      // a menos que sea una petición desde Telegram WebApp validada o que venga el token en URL
+      const isTokenValid = token && token === config.token;
+      const isCodeValid = code && code.toUpperCase() === config.accessCode.toUpperCase();
+
+      const budgets = db.leadBudgets?.[id] || [];
+
+      return res.json({
+        success: true,
+        authenticated: isTokenValid || isCodeValid,
+        data: {
+          config,
+          business: {
+            name: business.name,
+            municipality: business.municipality,
+            phone: business.phone,
+            address: business.address,
+            primary_category: business.primary_category
+          },
+          budgets
+        }
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 24. GUARDAR PRESUPUESTO EN EL ESPACIO PRIVADO DEL LEAD
+  app.post("/api/miniapp/lead/:id/budget", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { budget, token, code } = req.body;
+
+      const config = db.miniApps?.[id];
+      if (!config) {
+        return res.status(404).json({ error: "MiniApp no configurada" });
+      }
+
+      const isTokenValid = token && token === config.token;
+      const isCodeValid = code && code.toUpperCase() === config.accessCode.toUpperCase();
+
+      if (!isTokenValid && !isCodeValid) {
+        return res.status(401).json({ error: "Acceso no autorizado a este panel" });
+      }
+
+      if (!db.leadBudgets) db.leadBudgets = {};
+      if (!db.leadBudgets[id]) db.leadBudgets[id] = [];
+
+      const newBudget = {
+        ...budget,
+        id: budget.id || `pres-${Date.now()}`,
+        number: budget.number || `PRES-${new Date().getFullYear()}-${String(db.leadBudgets[id].length + 1).padStart(3, '0')}`,
+        createdAt: new Date().toISOString()
+      };
+
+      db.leadBudgets[id].unshift(newBudget);
+      saveDatabase();
+
+      return res.json({ success: true, data: newBudget });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 25. RUNTIME PÚBLICO DEL PROTOTIPO WEB
+  app.get("/api/prototype/lead/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const business = db.businesses[id];
+      if (!business) {
+        return res.status(404).json({ error: "Negocio no encontrado" });
+      }
+
+      let prototype = db.websitePrototypes?.[id];
+      if (!prototype) {
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        const miniApp = db.miniApps?.[id];
+        prototype = await generateWebsitePrototypeForLead(business, miniApp, baseUrl);
+        if (!db.websitePrototypes) db.websitePrototypes = {};
+        db.websitePrototypes[id] = prototype;
+        saveDatabase();
+      }
+
+      return res.json({
+        success: true,
+        data: prototype
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
 }
+
+/**
+ * Helpers exportados para integración con el Bot de Telegram
+ */
+export function getLeadMiniAppConfig(leadId: string): LeadMiniAppConfig | null {
+  return db.miniApps?.[leadId] || null;
+}
+
+export function findLeadByIdOrParam(param: string): { business: Business; miniApp?: LeadMiniAppConfig } | null {
+  if (!param) return null;
+  const cleanParam = param.replace(/^lead_/, '').trim();
+
+  // Buscar por id directo
+  if (db.businesses[cleanParam]) {
+    return {
+      business: db.businesses[cleanParam],
+      miniApp: db.miniApps?.[cleanParam]
+    };
+  }
+
+  // Buscar por token
+  if (db.miniApps) {
+    for (const [id, m] of Object.entries(db.miniApps)) {
+      if (m.token === cleanParam || m.token === param) {
+        return {
+          business: db.businesses[id],
+          miniApp: m
+        };
+      }
+    }
+  }
+
+  return null;
+}
+

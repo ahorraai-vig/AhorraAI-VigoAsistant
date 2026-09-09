@@ -42,8 +42,12 @@ import {
   FileText,
   Download,
   Copy,
+  Save,
   Smartphone,
   CheckSquare,
+  Key,
+  Share2,
+  Globe2,
 } from "lucide-react";
 import { adminFetch } from "../../lib/apiAuth";
 import {
@@ -59,6 +63,7 @@ import {
   OutreachOutcome,
 } from "../../types/prospector";
 import { TestCaseResult } from "../../lib/prospector/testCases";
+import { LeadMiniAppConfig, LeadWebsitePrototype } from "../../../api/prospector_miniapp_types";
 
 export interface TelegramProposalData {
   leadId: string;
@@ -108,8 +113,21 @@ export default function AdminPontevedraProspector() {
   const [proposalSendingEmail, setProposalSendingEmail] = useState(false);
   const [copiedSubject, setCopiedSubject] = useState(false);
   const [copiedBody, setCopiedBody] = useState(false);
-  const [proposalActiveSubtab, setProposalActiveSubtab] = useState<"mockup" | "email" | "pdf">("mockup");
+  const [proposalActiveSubtab, setProposalActiveSubtab] = useState<"miniapp" | "prototype" | "mockup" | "email" | "pdf">("miniapp");
   const [mockupInputText, setMockupInputText] = useState("");
+
+  // MiniApp Telegram Personalizada & Prototipo Web
+  const [miniappConfig, setMiniappConfig] = useState<LeadMiniAppConfig | null>(null);
+  const [miniappLoading, setMiniappLoading] = useState(false);
+  const [websitePrototype, setWebsitePrototype] = useState<LeadWebsitePrototype | null>(null);
+  const [websitePrototypeLoading, setWebsitePrototypeLoading] = useState(false);
+  const [copiedTelegramLink, setCopiedTelegramLink] = useState(false);
+  const [copiedWebLink, setCopiedWebLink] = useState(false);
+  const [copiedSalesPitch, setCopiedSalesPitch] = useState(false);
+  const [copiedProtoLink, setCopiedProtoLink] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [deployLoading, setDeployLoading] = useState(false);
+  const [copiedDeployedPitch, setCopiedDeployedPitch] = useState(false);
 
   // Filtros de listado
   const [filterMun, setFilterMun] = useState("");
@@ -180,6 +198,8 @@ export default function AdminPontevedraProspector() {
     setSelectedLeadId(id);
     setSelectedLeadDetail(null);
     setProposal(null);
+    setMiniappConfig(null);
+    setWebsitePrototype(null);
     setMockupInputText("");
     try {
       const res = await adminFetch(`/api/pontevedra-prospector/leads/${id}`);
@@ -189,9 +209,19 @@ export default function AdminPontevedraProspector() {
         if (d.data?.business?.email) {
           setProposalEmailTarget(d.data.business.email);
         }
+        if (d.data?.proposal) {
+          setProposal(d.data.proposal);
+          setMockupInputText(d.data.proposal.sampleInputPlaceholder || "");
+        }
+        if (d.data?.miniApp) {
+          setMiniappConfig(d.data.miniApp);
+        }
+        if (d.data?.websitePrototype) {
+          setWebsitePrototype(d.data.websitePrototype);
+        }
       }
 
-      // Intentar cargar propuesta ya generada anteriormente
+      // Si no vinieron en la respuesta principal, intentar llamadas individuales seguras
       try {
         const propRes = await adminFetch(`/api/pontevedra-prospector/leads/${id}/proposal`);
         if (propRes.ok) {
@@ -204,8 +234,75 @@ export default function AdminPontevedraProspector() {
       } catch {
         // Es normal si aún no se ha generado
       }
+
+      try {
+        const miniRes = await adminFetch(`/api/pontevedra-prospector/leads/${id}/miniapp`);
+        if (miniRes.ok) {
+          const miniData = await miniRes.json();
+          if (miniData?.data) {
+            setMiniappConfig(miniData.data);
+          }
+        }
+      } catch {
+        // Normal si aún no existe
+      }
+
+      try {
+        const protoRes = await adminFetch(`/api/pontevedra-prospector/leads/${id}/website-prototype`);
+        if (protoRes.ok) {
+          const protoData = await protoRes.json();
+          if (protoData?.data) {
+            setWebsitePrototype(protoData.data);
+          }
+        }
+      } catch {
+        // Normal si aún no existe
+      }
     } catch (err: any) {
       showToast("Error cargando detalle del lead", "error");
+    }
+  };
+
+  const handleGenerateMiniApp = async (leadId: string) => {
+    setMiniappLoading(true);
+    try {
+      const res = await adminFetch(`/api/pontevedra-prospector/leads/${leadId}/generate-miniapp`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok && data.data) {
+        setMiniappConfig(data.data);
+        showToast("¡MiniApp de Telegram generada con éxito con acceso individual!");
+      } else {
+        showToast(data.error || "Error generando MiniApp", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "Error al comunicarse con el generador", "error");
+    } finally {
+      setMiniappLoading(false);
+    }
+  };
+
+  const handleGenerateWebsitePrototype = async (leadId: string) => {
+    setWebsitePrototypeLoading(true);
+    try {
+      const res = await adminFetch(`/api/pontevedra-prospector/leads/${leadId}/generate-website-prototype`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok && data.data) {
+        setWebsitePrototype(data.data);
+        if (data.miniApp) {
+          setMiniappConfig(data.miniApp);
+        }
+        showToast("¡Prototipo Web y MiniApp creados con éxito!");
+      } else {
+        showToast(data.error || "Error generando prototipo web", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "Error al comunicarse con el generador", "error");
+    } finally {
+      setWebsitePrototypeLoading(false);
     }
   };
 
@@ -230,6 +327,89 @@ export default function AdminPontevedraProspector() {
       showToast(err.message || "Error al comunicarse con el generador", "error");
     } finally {
       setProposalLoading(false);
+    }
+  };
+
+  const handleSaveProposal = async (leadId: string) => {
+    setSaveLoading(true);
+    try {
+      const res = await adminFetch(`/api/pontevedra-prospector/leads/${leadId}/save-proposal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          proposal,
+          miniApp: miniappConfig,
+          websitePrototype,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast("¡Propuesta comercial y MiniApp guardadas con éxito!");
+        if (data.data?.leadStatus && selectedLeadDetail) {
+          setSelectedLeadDetail({
+            ...selectedLeadDetail,
+            leadStatus: { ...selectedLeadDetail.leadStatus, status: data.data.leadStatus },
+          });
+        }
+        loadData();
+      } else {
+        showToast(data.error || "Error al guardar propuesta", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "Error al guardar propuesta", "error");
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  const handleDeployToTelegram = async (leadId: string) => {
+    if (!confirm("¿Confirmas que el cliente ha aceptado la propuesta y deseas desplegar la MiniApp oficial en Telegram?")) return;
+    setDeployLoading(true);
+    try {
+      const res = await adminFetch(`/api/pontevedra-prospector/leads/${leadId}/deploy-to-telegram`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok && data.data) {
+        setMiniappConfig(data.data.miniApp);
+        if (data.data.websitePrototype) {
+          setWebsitePrototype(data.data.websitePrototype);
+        }
+        if (selectedLeadDetail) {
+          setSelectedLeadDetail({
+            ...selectedLeadDetail,
+            leadStatus: data.data.leadStatus,
+          });
+        }
+        showToast("🎉 ¡MiniApp desplegada con éxito en Telegram para el cliente!");
+        loadData();
+      } else {
+        showToast(data.error || "Error al desplegar en Telegram", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "Error al desplegar", "error");
+    } finally {
+      setDeployLoading(false);
+    }
+  };
+
+  const handleUndeployTelegram = async (leadId: string) => {
+    if (!confirm("¿Deseas revertir el despliegue a modo borrador?")) return;
+    setDeployLoading(true);
+    try {
+      const res = await adminFetch(`/api/pontevedra-prospector/leads/${leadId}/undeploy-telegram`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        if (miniappConfig) {
+          setMiniappConfig({ ...miniappConfig, isDeployedToTelegram: false, deploymentStatus: "DRAFT" });
+        }
+        showToast("Despliegue revertido a borrador");
+      }
+    } catch (err: any) {
+      showToast(err.message || "Error al revertir", "error");
+    } finally {
+      setDeployLoading(false);
     }
   };
 
@@ -1699,99 +1879,585 @@ export default function AdminPontevedraProspector() {
                 </div>
               )}
 
-              {/* GENERADOR DE PROPUESTA B2B & MAQUETA MINIAPP TELEGRAM (MODELO OBRACLIMA) */}
+              {/* CENTRO DE CONVERSIÓN COMERCIAL: MINIAPPS TELEGRAM & PROTOTIPOS WEB (MODELO OBRACLIMA AI) */}
               <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 border border-indigo-500/30 shadow-xl space-y-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-indigo-500/20">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shrink-0 shadow-lg shadow-blue-500/30">
-                      <Smartphone size={20} />
+                      <Bot size={20} />
                     </div>
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="text-base font-bold text-white">
-                          Generador de Propuesta & Maqueta MiniApp Telegram
+                          Centro de Conversión: MiniApp Telegram & Prototipos Web (IA)
                         </h3>
                         <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 rounded-full">
-                          Arquitectura ObraClima AI
+                          Bot @ahorraaivigoasistant_bot
                         </span>
                       </div>
                       <p className="text-xs text-slate-300 mt-0.5 max-w-2xl">
-                        Diseña al instante un correo B2B persuasivo y un dossier PDF con la simulación gráfica exacta de su propia MiniApp en Telegram (con catálogo de precios, cotizador por IA y cumplimiento RGPD), adaptado al oficio y dolores detectados en {selectedLeadDetail.business.name}.
+                        Genera bajo el mismo bot de Telegram una MiniApp individual y privada para {selectedLeadDetail.business.name} (con PIN y cotizador por IA), o diseña el prototipo interactivo de su página web con Google Places y Gemini.
                       </p>
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => handleGenerateProposal(selectedLeadDetail.business.id)}
-                    disabled={proposalLoading}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all disabled:opacity-50 shrink-0"
-                  >
-                    <Sparkles size={16} className={proposalLoading ? "animate-spin" : ""} />
-                    {proposalLoading ? "Generando con Gemini IA..." : proposal ? "Regenerar Propuesta" : "Generar Propuesta y Maqueta"}
-                  </button>
-                </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Botón: Guardar Propuesta */}
+                    <button
+                      onClick={() => handleSaveProposal(selectedLeadDetail.business.id)}
+                      disabled={saveLoading || (!proposal && !miniappConfig && !websitePrototype)}
+                      className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-350 hover:text-emerald-300 font-bold text-xs rounded-xl border border-emerald-500/30 transition-all disabled:opacity-50 shrink-0 cursor-pointer shadow-xs"
+                      title="Guardar propuesta comercial, MiniApp y Prototipo Web en la ficha del lead"
+                    >
+                      <Save size={14} className={saveLoading ? "animate-spin text-emerald-400" : "text-emerald-400"} />
+                      {saveLoading ? "Guardando..." : "Guardar Propuesta"}
+                    </button>
 
-                {proposalLoading && (
-                  <div className="py-12 text-center space-y-3 bg-slate-950/60 rounded-xl border border-indigo-500/20">
-                    <Sparkles size={32} className="mx-auto text-blue-400 animate-spin" />
-                    <p className="text-sm font-semibold text-white">Analizando debilidades de prospección y estructurando MiniApp...</p>
-                    <p className="text-xs text-slate-400">Gemini IA está redactando el correo B2B y configurando el catálogo de {selectedLeadDetail.business.primary_category}...</p>
-                  </div>
-                )}
-
-                {proposal && !proposalLoading && (
-                  <div className="space-y-4">
-                    {/* SUB-TABS: MAQUETA / EMAIL / PDF */}
-                    <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-                      <button
-                        onClick={() => setProposalActiveSubtab("mockup")}
-                        className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                          proposalActiveSubtab === "mockup"
-                            ? "bg-blue-600 text-white shadow-md"
-                            : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
-                        }`}
-                      >
-                        <Smartphone size={14} />
-                        1. Maqueta Gráfica MiniApp
-                      </button>
-
-                      <button
-                        onClick={() => setProposalActiveSubtab("email")}
-                        className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                          proposalActiveSubtab === "email"
-                            ? "bg-blue-600 text-white shadow-md"
-                            : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
-                        }`}
-                      >
-                        <Mail size={14} />
-                        2. Correo B2B Redactado
-                      </button>
-
-                      <button
-                        onClick={() => setProposalActiveSubtab("pdf")}
-                        className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                          proposalActiveSubtab === "pdf"
-                            ? "bg-blue-600 text-white shadow-md"
-                            : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
-                        }`}
-                      >
-                        <FileText size={14} />
-                        3. Dossier PDF para Adjuntar
-                      </button>
-
-                      <div className="ml-auto">
-                        <button
-                          onClick={() => handleDownloadProposalPdf(selectedLeadDetail.business.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-md transition-colors"
+                    {/* Botón / Estado: Desplegar en Telegram */}
+                    {miniappConfig?.isDeployedToTelegram ? (
+                      <div className="inline-flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-black shadow-xs">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                          DESPLEGADO EN TELEGRAM
+                        </span>
+                        <a
+                          href={`https://t.me/ahorraaivigoasistant_bot?start=lead_${selectedLeadDetail.business.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold rounded-lg inline-flex items-center gap-1 shadow-xs cursor-pointer"
                         >
-                          <Download size={14} />
-                          Descargar PDF
+                          <Bot size={12} /> Probar Bot
+                        </a>
+                        <button
+                          onClick={() => handleUndeployTelegram(selectedLeadDetail.business.id)}
+                          disabled={deployLoading}
+                          className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 text-[10px] rounded-lg border border-slate-700 transition-all cursor-pointer"
+                          title="Revertir despliegue a borrador"
+                        >
+                          Revertir
                         </button>
                       </div>
-                    </div>
+                    ) : (
+                      <button
+                        onClick={() => handleDeployToTelegram(selectedLeadDetail.business.id)}
+                        disabled={deployLoading}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md shadow-emerald-950/40 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+                        title="Cuando el cliente acepte, pulsa aquí para activar la MiniApp en @ahorraaivigoasistant_bot"
+                      >
+                        <Zap size={14} className={deployLoading ? "animate-spin text-amber-300" : "text-amber-300 fill-amber-300"} />
+                        {deployLoading ? "Desplegando..." : "🚀 Cliente Acepta: Desplegar en Telegram"}
+                      </button>
+                    )}
 
-                    {/* VISTA 1: MAQUETA VISUAL INTERACTIVA (SIMULADOR TELEGRAM MINIAPP) */}
-                    {proposalActiveSubtab === "mockup" && (
+                    {/* Botón: Generar / Regenerar Correo & PDF */}
+                    <button
+                      onClick={() => handleGenerateProposal(selectedLeadDetail.business.id)}
+                      disabled={proposalLoading}
+                      className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+                    >
+                      <Sparkles size={14} className={proposalLoading ? "animate-spin text-blue-400" : "text-blue-400"} />
+                      {proposalLoading ? "Generando..." : proposal ? "Regenerar Correo & PDF" : "Generar Correo & PDF"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* SUB-TABS: MINIAPP / PROTOTIPO / EMAIL / PDF / MOCKUP */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 border-b border-slate-800 pb-3 flex-wrap">
+                    <button
+                      onClick={() => setProposalActiveSubtab("miniapp")}
+                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        proposalActiveSubtab === "miniapp"
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
+                      }`}
+                    >
+                      <Bot size={14} />
+                      1. MiniApp Telegram Privada
+                      {miniappConfig && <span className="w-2 h-2 rounded-full bg-emerald-400" title="MiniApp generada"></span>}
+                    </button>
+
+                    <button
+                      onClick={() => setProposalActiveSubtab("prototype")}
+                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        proposalActiveSubtab === "prototype"
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
+                      }`}
+                    >
+                      <Globe2 size={14} />
+                      2. Prototipo Web con IA
+                      {!selectedLeadDetail.business.website && (
+                        <span className="text-[10px] px-1.5 py-0.2 bg-amber-500/30 text-amber-300 rounded font-semibold">
+                          Sin Web
+                        </span>
+                      )}
+                      {websitePrototype && <span className="w-2 h-2 rounded-full bg-emerald-400" title="Prototipo web generado"></span>}
+                    </button>
+
+                    <button
+                      onClick={() => setProposalActiveSubtab("email")}
+                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        proposalActiveSubtab === "email"
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
+                      }`}
+                    >
+                      <Mail size={14} />
+                      3. Correo B2B Redactado
+                    </button>
+
+                    <button
+                      onClick={() => setProposalActiveSubtab("pdf")}
+                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        proposalActiveSubtab === "pdf"
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
+                      }`}
+                    >
+                      <FileText size={14} />
+                      4. Dossier PDF
+                    </button>
+
+                    <button
+                      onClick={() => setProposalActiveSubtab("mockup")}
+                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        proposalActiveSubtab === "mockup"
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
+                      }`}
+                    >
+                      <Smartphone size={14} />
+                      5. Maqueta ObraClima
+                    </button>
+
+                    <div className="ml-auto">
+                      <button
+                        onClick={() => handleDownloadProposalPdf(selectedLeadDetail.business.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-md transition-colors cursor-pointer"
+                      >
+                        <Download size={14} />
+                        Descargar PDF
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* VISTA A: MINIAPP TELEGRAM INDIVIDUAL Y PRIVADA */}
+                  {proposalActiveSubtab === "miniapp" && (
+                    <div className="space-y-5">
+                      <div className="bg-slate-950/80 p-5 rounded-2xl border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+                            <h4 className="font-bold text-white text-base">
+                              MiniApp Individual en Telegram • @ahorraaivigoasistant_bot
+                            </h4>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                              Arquitectura ObraClima AI
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 max-w-2xl">
+                            MiniApp dedicada y privada para {selectedLeadDetail.business.name}. Incluye catálogo personalizado con partidas de {selectedLeadDetail.business.primary_category}, cotizador inteligente con IA y acceso restringido con PIN.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateMiniApp(selectedLeadDetail.business.id)}
+                          disabled={miniappLoading}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+                        >
+                          <Sparkles size={16} className={miniappLoading ? "animate-spin" : ""} />
+                          {miniappLoading
+                            ? "Diseñando MiniApp con IA..."
+                            : miniappConfig
+                            ? "Regenerar MiniApp con IA"
+                            : "⚡ Generar MiniApp Telegram"}
+                        </button>
+                      </div>
+
+                      {miniappLoading && (
+                        <div className="py-12 text-center space-y-3 bg-slate-950/60 rounded-xl border border-blue-500/20">
+                          <Sparkles size={32} className="mx-auto text-blue-400 animate-spin" />
+                          <p className="text-sm font-semibold text-white">Configurando catálogo personalizado y prompts de Gemini...</p>
+                          <p className="text-xs text-slate-400">Creando credenciales privadas y deep link para Telegram...</p>
+                        </div>
+                      )}
+
+                      {!miniappConfig && !miniappLoading && (
+                        <div className="py-12 text-center space-y-3 bg-slate-950/40 rounded-xl border border-dashed border-slate-800">
+                          <Bot size={36} className="mx-auto text-slate-600" />
+                          <p className="text-sm font-semibold text-slate-300">MiniApp aún no generada para este cliente</p>
+                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                            Haz clic en el botón superior para que Gemini diseñe el catálogo técnico de {selectedLeadDetail.business.primary_category}, configure las partidas con mano de obra y genere el PIN y enlace deep-link de Telegram.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateMiniApp(selectedLeadDetail.business.id)}
+                            className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold cursor-pointer"
+                          >
+                            <Sparkles size={14} /> Crear MiniApp Ahora
+                          </button>
+                        </div>
+                      )}
+
+                      {miniappConfig && !miniappLoading && (
+                        <div className="space-y-5">
+                          {/* ESTADO DE DESPLIEGUE EN TELEGRAM (BORRADOR vs ACTIVO) */}
+                          {miniappConfig.isDeployedToTelegram ? (
+                            <div className="bg-emerald-950/40 p-4 rounded-xl border border-emerald-500/40 space-y-3 shadow-lg shadow-emerald-950/20">
+                              <div className="flex items-center justify-between flex-wrap gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                                  <span className="text-xs font-black text-emerald-300 uppercase tracking-wider">
+                                    MiniApp Desplegada y Activa en Telegram
+                                  </span>
+                                  <span className="text-[11px] text-emerald-400/80 font-mono">
+                                    ({miniappConfig.deployedAt ? new Date(miniappConfig.deployedAt).toLocaleDateString() : "Producción"})
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <a
+                                    href={`https://t.me/ahorraaivigoasistant_bot?start=lead_${selectedLeadDetail.business.id}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-xs"
+                                  >
+                                    <Bot size={14} /> Abrir en Telegram <ExternalLink size={11} />
+                                  </a>
+                                </div>
+                              </div>
+                              <p className="text-xs text-slate-300">
+                                La MiniApp de <strong>{selectedLeadDetail.business.name}</strong> está oficialmente enlazada al bot <code className="text-emerald-300">@ahorraaivigoasistant_bot</code>. Cuando los administradores o empleados pulsen el enlace o inicien con <code className="text-emerald-300">/start lead_{selectedLeadDetail.business.id}</code>, el bot les abrirá la MiniApp con su catálogo y tarifas exclusivas.
+                              </p>
+                              <div className="flex items-center justify-between pt-1 border-t border-emerald-500/20 flex-wrap gap-2">
+                                <span className="text-[11px] text-slate-400">Mensaje de Entrega Oficial para el Cliente (WhatsApp / Email):</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const deliveryMsg = `¡Enhorabuena, equipo de ${selectedLeadDetail.business.name}! 🚀\n\nVuestra MiniApp de gestión y presupuestos con IA ya está desplegada y 100% activa en Telegram.\n\n📱 Acceso directo en Telegram: https://t.me/ahorraaivigoasistant_bot?start=lead_${selectedLeadDetail.business.id}\n🔑 PIN de acceso privado para vuestro equipo: ${miniappConfig.accessCode}\n🌐 Acceso web alternativo: ${window.location.origin}/miniapp/${selectedLeadDetail.business.id}?token=${miniappConfig.token}\n\nCualquier duda estamos a vuestra disposición.`;
+                                    navigator.clipboard.writeText(deliveryMsg);
+                                    setCopiedDeployedPitch(true);
+                                    setTimeout(() => setCopiedDeployedPitch(false), 2000);
+                                  }}
+                                  className="text-xs font-bold text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Copy size={12} /> {copiedDeployedPitch ? "¡Mensaje Copiado!" : "Copiar Mensaje de Entrega"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+                              <div className="space-y-1 text-center sm:text-left">
+                                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                                  <Clock size={14} className="text-amber-400" />
+                                  Estado: En Prospección / Demostración Comercial
+                                </div>
+                                <p className="text-xs text-slate-400">
+                                  Esta maqueta funciona en simulador web. En cuanto el cliente acepte el presupuesto, pulsa el botón para desplegarla oficialmente en el bot de Telegram.
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => handleDeployToTelegram(selectedLeadDetail.business.id)}
+                                disabled={deployLoading}
+                                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md transition-all disabled:opacity-50 shrink-0 cursor-pointer flex items-center gap-2"
+                              >
+                                <Zap size={14} className={deployLoading ? "animate-spin text-amber-300" : "text-amber-300 fill-amber-300"} />
+                                {deployLoading ? "Desplegando..." : "🚀 Cliente Acepta: Desplegar en Telegram"}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* PANEL DE ACCESOS Y CREDENCIALES PRIVADAS */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {/* Deep link Telegram */}
+                            <div className="bg-slate-950/90 p-4 rounded-xl border border-slate-800 space-y-2">
+                              <div className="text-[11px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <Bot size={14} /> Enlace Nativo Telegram
+                              </div>
+                              <div className="text-xs font-mono text-slate-300 break-all bg-slate-900 p-2 rounded-lg border border-slate-800">
+                                https://t.me/ahorraaivigoasistant_bot?start=lead_{selectedLeadDetail.business.id}
+                              </div>
+                              <div className="flex items-center gap-2 pt-1">
+                                <a
+                                  href={`https://t.me/ahorraaivigoasistant_bot?start=lead_${selectedLeadDetail.business.id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1"
+                                >
+                                  Abrir en Telegram <ExternalLink size={10} />
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(`https://t.me/ahorraaivigoasistant_bot?start=lead_${selectedLeadDetail.business.id}`);
+                                    setCopiedTelegramLink(true);
+                                    setTimeout(() => setCopiedTelegramLink(false), 2000);
+                                  }}
+                                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Copy size={10} /> {copiedTelegramLink ? "¡Copiado!" : "Copiar"}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Enlace Web con Token */}
+                            <div className="bg-slate-950/90 p-4 rounded-xl border border-slate-800 space-y-2">
+                              <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <Globe size={14} /> Enlace Web Privado (Token)
+                              </div>
+                              <div className="text-xs font-mono text-slate-300 break-all bg-slate-900 p-2 rounded-lg border border-slate-800">
+                                {window.location.origin}/miniapp/{selectedLeadDetail.business.id}?token={miniappConfig.token}
+                              </div>
+                              <div className="flex items-center gap-2 pt-1">
+                                <a
+                                  href={`/miniapp/${selectedLeadDetail.business.id}?token=${miniappConfig.token}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1"
+                                >
+                                  Abrir MiniApp <ExternalLink size={10} />
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(`${window.location.origin}/miniapp/${selectedLeadDetail.business.id}?token=${miniappConfig.token}`);
+                                    setCopiedWebLink(true);
+                                    setTimeout(() => setCopiedWebLink(false), 2000);
+                                  }}
+                                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Copy size={10} /> {copiedWebLink ? "¡Copiado!" : "Copiar"}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Código PIN de Seguridad */}
+                            <div className="bg-slate-950/90 p-4 rounded-xl border border-slate-800 space-y-2">
+                              <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <Key size={14} /> Código PIN Privado
+                              </div>
+                              <div className="text-xl font-mono font-black text-amber-300 bg-slate-900 p-2 rounded-lg border border-slate-800 text-center tracking-widest">
+                                {miniappConfig.accessCode}
+                              </div>
+                              <p className="text-[10px] text-slate-400 text-center">
+                                Protege el panel para que solo el cliente o su equipo puedan consultar sus presupuestos.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* MENSAJE COMERCIAL LISTO PARA WHATSAPP / EMAIL */}
+                          <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                                <Share2 size={14} className="text-blue-400" />
+                                Mensaje Comercial de Prospección (WhatsApp / SMS / LinkedIn):
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const sectorName = miniappConfig.sector || selectedLeadDetail.business.primary_category;
+                                  const pitch = `¡Hola! Para ${selectedLeadDetail.business.name} hemos preparado una solución inteligente en Telegram para calcular presupuestos con IA en 1 minuto adaptada a ${sectorName}. Pruébalo en Telegram: https://t.me/ahorraaivigoasistant_bot?start=lead_${selectedLeadDetail.business.id} o directamente vía Web: ${window.location.origin}/miniapp/${selectedLeadDetail.business.id}?token=${miniappConfig.token} (PIN de acceso privado: ${miniappConfig.accessCode}).`;
+                                  navigator.clipboard.writeText(pitch);
+                                  setCopiedSalesPitch(true);
+                                  setTimeout(() => setCopiedSalesPitch(false), 2000);
+                                }}
+                                className="text-xs font-bold text-blue-400 hover:text-blue-300 inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Copy size={12} /> {copiedSalesPitch ? "¡Mensaje Copiado!" : "Copiar Mensaje"}
+                              </button>
+                            </div>
+                            <div className="p-3 bg-slate-900 rounded-lg text-xs font-mono text-slate-300 leading-relaxed border border-slate-800 select-all">
+                              ¡Hola! Para <strong>{selectedLeadDetail.business.name}</strong> hemos preparado una solución inteligente en Telegram para calcular presupuestos con IA en 1 minuto adaptada a {miniappConfig.sector || selectedLeadDetail.business.primary_category}.<br /><br />
+                              📱 <strong>Probar en Telegram:</strong> https://t.me/ahorraaivigoasistant_bot?start=lead_{selectedLeadDetail.business.id}<br />
+                              🌐 <strong>O directamente vía Web:</strong> {window.location.origin}/miniapp/{selectedLeadDetail.business.id}?token={miniappConfig.token}<br />
+                              🔑 <strong>PIN de acceso privado:</strong> {miniappConfig.accessCode}
+                            </div>
+                          </div>
+
+                          {/* SIMULADOR EN VIVO (IFRAME MINIAPP TELEGRAM) */}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                              <span>Vista Previa Interactiva de la MiniApp del Cliente:</span>
+                              <span className="text-emerald-400 font-semibold">● Simulador en directo</span>
+                            </div>
+                            <div className="bg-slate-950 p-2 rounded-2xl border border-slate-800 shadow-2xl max-w-xl mx-auto overflow-hidden">
+                              <iframe
+                                src={`/miniapp/${selectedLeadDetail.business.id}?token=${miniappConfig.token}`}
+                                title="MiniApp Telegram Preview"
+                                className="w-full h-[650px] rounded-xl border border-slate-800 bg-slate-900"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* VISTA B: PROTOTIPO DE PÁGINA WEB CON IA */}
+                  {proposalActiveSubtab === "prototype" && (
+                    <div className="space-y-5">
+                      <div className="bg-slate-950/80 p-5 rounded-2xl border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Globe2 size={18} className="text-blue-400" />
+                            <h4 className="font-bold text-white text-base">
+                              Prototipo de Página Web con IA (Google Places + Gemini)
+                            </h4>
+                          </div>
+                          <p className="text-xs text-slate-400 max-w-2xl">
+                            Diseñado a demanda para autónomos y empresas sin página web (o con web obsoleta). Gemini analiza reseñas, fotos, ubicación y categoría para generar una maqueta web moderna orientada a la conversión y conectada a Telegram.
+                          </p>
+
+                          {/* ALERTA SEGÚN SI TIENE WEB O NO */}
+                          <div className="pt-2">
+                            {!selectedLeadDetail.business.website ? (
+                              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-semibold">
+                                <AlertCircle size={14} /> Lead sin página web en Google Maps • ¡Máxima probabilidad de cierre comercial!
+                              </div>
+                            ) : (
+                              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-medium">
+                                <Globe size={14} /> Web actual registrada: <a href={selectedLeadDetail.business.website} target="_blank" rel="noreferrer" className="underline font-bold text-blue-400">{selectedLeadDetail.business.website}</a>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateWebsitePrototype(selectedLeadDetail.business.id)}
+                          disabled={websitePrototypeLoading}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+                        >
+                          <Sparkles size={16} className={websitePrototypeLoading ? "animate-spin" : ""} />
+                          {websitePrototypeLoading
+                            ? "Diseñando Web con IA..."
+                            : websitePrototype
+                            ? "Regenerar Prototipo Web"
+                            : "⚡ Generar Prototipo Web con IA"}
+                        </button>
+                      </div>
+
+                      {websitePrototypeLoading && (
+                        <div className="py-12 text-center space-y-3 bg-slate-950/60 rounded-xl border border-emerald-500/20">
+                          <Sparkles size={32} className="mx-auto text-emerald-400 animate-spin" />
+                          <p className="text-sm font-semibold text-white">Extrayendo datos de Google Maps y redactando textos comerciales...</p>
+                          <p className="text-xs text-slate-400">Configurando catálogo de servicios locales, testimonios y cotizador en {selectedLeadDetail.business.municipality}...</p>
+                        </div>
+                      )}
+
+                      {!websitePrototype && !websitePrototypeLoading && (
+                        <div className="py-12 text-center space-y-3 bg-slate-950/40 rounded-xl border border-dashed border-slate-800">
+                          <Globe2 size={36} className="mx-auto text-slate-600" />
+                          <p className="text-sm font-semibold text-slate-300">Prototipo web aún no generado</p>
+                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                            Gemini evaluará la información y fotos del negocio en Google para redactar una web moderna, con llamada a la acción hacia la MiniApp de Telegram y formulario de contacto.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateWebsitePrototype(selectedLeadDetail.business.id)}
+                            className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold cursor-pointer"
+                          >
+                            <Sparkles size={14} /> Diseñar Prototipo Web Ahora
+                          </button>
+                        </div>
+                      )}
+
+                      {websitePrototype && !websitePrototypeLoading && (
+                        <div className="space-y-5">
+                          {/* TARJETA DE CONTROL Y ENLACE AL PROTOTIPO */}
+                          <div className="bg-slate-950/90 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                  PROTOTIPO ACTIVO Y PUBLICADO
+                                </span>
+                                <span className="text-xs text-slate-300 font-semibold">{websitePrototype.businessName}</span>
+                              </div>
+                              <p className="text-xs text-slate-400 mt-1">
+                                Enlace público para demostración al cliente: <span className="font-mono text-slate-300">{window.location.origin}/prototype/{selectedLeadDetail.business.id}</span>
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`${window.location.origin}/prototype/${selectedLeadDetail.business.id}`);
+                                  setCopiedProtoLink(true);
+                                  setTimeout(() => setCopiedProtoLink(false), 2000);
+                                }}
+                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <Copy size={12} /> {copiedProtoLink ? "¡Copiado!" : "Copiar Enlace"}
+                              </button>
+                              <a
+                                href={`/prototype/${selectedLeadDetail.business.id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors"
+                              >
+                                <ExternalLink size={12} /> Abrir en Pantalla Completa
+                              </a>
+                            </div>
+                          </div>
+
+                          {/* RESUMEN DE ELEMENTOS GENERADOS */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                              <span className="text-slate-400 block font-semibold text-[11px]">Titular Comercial</span>
+                              <span className="font-bold text-white mt-0.5 block">{websitePrototype.headline}</span>
+                            </div>
+                            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                              <span className="text-slate-400 block font-semibold text-[11px]">Servicios Generados</span>
+                              <span className="font-bold text-white mt-0.5 block">{websitePrototype.services.length} partidas con descripciones</span>
+                            </div>
+                            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                              <span className="text-slate-400 block font-semibold text-[11px]">Integración Telegram</span>
+                              <span className="font-bold text-emerald-400 mt-0.5 block">Banner CTA a @ahorraaivigoasistant_bot</span>
+                            </div>
+                          </div>
+
+                          {/* VISOR EN VIVO DE LA WEB PROTOTIPO */}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                              <span>Simulación en Vivo de la Página Web del Cliente:</span>
+                              <span className="text-emerald-400 font-semibold">● 100% Responsivo</span>
+                            </div>
+                            <div className="rounded-2xl border border-slate-700 shadow-2xl overflow-hidden bg-white">
+                              <iframe
+                                src={`/prototype/${selectedLeadDetail.business.id}`}
+                                title="Prototipo Web"
+                                className="w-full h-[650px] border-0"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* VISTA 1: MAQUETA VISUAL INTERACTIVA (SIMULADOR TELEGRAM MINIAPP) */}
+                  {["mockup", "email", "pdf"].includes(proposalActiveSubtab) && !proposal && !proposalLoading && (
+                    <div className="py-12 text-center space-y-3 bg-slate-950/40 rounded-xl border border-dashed border-slate-800">
+                      <FileText size={36} className="mx-auto text-slate-600" />
+                      <p className="text-sm font-semibold text-slate-300">Dossier PDF y Correo B2B aún no generados</p>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        Haz clic en &quot;Generar Correo &amp; PDF&quot; para que Gemini IA redacte la propuesta personalizada y maquete el dossier comercial para {selectedLeadDetail.business.name}.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateProposal(selectedLeadDetail.business.id)}
+                        disabled={proposalLoading}
+                        className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        <Sparkles size={14} className={proposalLoading ? "animate-spin" : ""} />
+                        {proposalLoading ? "Generando con IA..." : "Generar Correo & PDF Ahora"}
+                      </button>
+                    </div>
+                  )}
+
+                  {proposalActiveSubtab === "mockup" && proposal && (
                       <div className="space-y-4">
                         <div className="flex items-center justify-between text-xs text-slate-400">
                           <span>Simulación fiel de la experiencia en Telegram (idéntica a ObraClima AI, personalizada para este cliente):</span>
@@ -1956,7 +2622,7 @@ export default function AdminPontevedraProspector() {
                     )}
 
                     {/* VISTA 2: CORREO B2B PERSONALIZADO */}
-                    {proposalActiveSubtab === "email" && (
+                    {proposalActiveSubtab === "email" && proposal && (
                       <div className="space-y-4 bg-slate-950/70 p-5 rounded-xl border border-slate-800">
                         {/* ASUNTO DEL CORREO */}
                         <div className="space-y-1.5">
@@ -2033,7 +2699,7 @@ export default function AdminPontevedraProspector() {
                     )}
 
                     {/* VISTA 3: DOSSIER PDF OFICIAL */}
-                    {proposalActiveSubtab === "pdf" && (
+                    {proposalActiveSubtab === "pdf" && proposal && (
                       <div className="space-y-4 bg-slate-950/70 p-5 rounded-xl border border-slate-800 text-xs">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
@@ -2088,8 +2754,7 @@ export default function AdminPontevedraProspector() {
                       </div>
                     )}
                   </div>
-                )}
-              </div>
+                </div>
 
               {/* CRM & GESTIÓN DE CONTACTO (OUTREACH) */}
               <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs">

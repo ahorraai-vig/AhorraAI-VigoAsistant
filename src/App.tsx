@@ -21,6 +21,8 @@ import AdminRoofProspecting from './pages/admin/AdminRoofProspecting';
 import ObraClimaDashboard from './pages/admin/obraclima/ObraClimaDashboard';
 import ObraClimaMiniApp from './pages/admin/obraclima/ObraClimaMiniApp';
 import AdminPontevedraProspector from './pages/admin/AdminPontevedraProspector';
+import LeadMiniApp from './pages/miniapp/LeadMiniApp';
+import BusinessPrototypeWeb from './pages/prototype/BusinessPrototypeWeb';
 
 export default function App() {
   return (
@@ -32,6 +34,8 @@ export default function App() {
         <Route path="/cooperacion" element={<BusinessPortal />} />
         <Route path="/obraclima-miniapp" element={<ObraClimaMiniApp />} />
         <Route path="/obraclima" element={<ObraClimaMiniApp />} />
+        <Route path="/miniapp/:leadId" element={<LeadMiniApp />} />
+        <Route path="/prototype/:leadId" element={<BusinessPrototypeWeb />} />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminDashboard />} />
           <Route path="prospector" element={<AdminProspector />} />

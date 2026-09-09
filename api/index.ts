@@ -13,7 +13,8 @@ import {
   parseBudgetWithAi 
 } from './obraclima';
 import { setupObraClimaScraperRoutes, scrapeWooCommerceProduct, isDomainOrSitemapUrl, startBackgroundSitemapCrawling, CRAWLER_INICIADO_MSG } from './obraclima_scraper';
-import { setupPontevedraProspectorRoutes } from './pontevedra_prospector';
+import { setupPontevedraProspectorRoutes, findLeadByIdOrParam } from './pontevedra_prospector';
+import { verifyWhatsAppWebhook, handleWhatsAppIncoming, sendWhatsAppTextMessage } from '../server/services/whatsapp';
 import { validateTelegramInitData } from '../server/services/obraclima/telegramAuth';
 import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService, weatherProvider } from '../server/services/vigo';
 import { 
@@ -212,8 +213,35 @@ app.get("/api/config/status", (req, res) => {
     supabaseServiceRole: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     telegramBot: !!process.env.TELEGRAM_BOT_TOKEN,
     serpApi: !!process.env.SERPAPI_API_KEY,
-    groq: !!process.env.GROQ_API_KEY
+    groq: !!process.env.GROQ_API_KEY,
+    whatsapp: !!process.env.WHATSAPP_ACCESS_TOKEN
   });
+});
+
+// --- Rutas de WhatsApp Business Cloud API (Meta Developers) ---
+app.get("/api/whatsapp/webhook", verifyWhatsAppWebhook);
+app.post("/api/whatsapp/webhook", handleWhatsAppIncoming);
+
+app.get("/api/whatsapp/status", (req, res) => {
+  res.json({
+    configured: !!process.env.WHATSAPP_ACCESS_TOKEN,
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "949730394900787",
+    verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || "ahorraai_meta_vigo_2026",
+    webhookUrl: `${(process.env.APP_URL || 'https://ais-dev-tvkcd5ffewortczttmdp2n-511583726387.europe-west2.run.app').replace(/\/$/, '')}/api/whatsapp/webhook`
+  });
+});
+
+app.post("/api/whatsapp/test-send", async (req, res) => {
+  const { to, text } = req.body;
+  if (!to || !text) {
+    return res.status(400).json({ error: "Faltan parámetros 'to' o 'text'." });
+  }
+  const ok = await sendWhatsAppTextMessage(to, text);
+  if (ok) {
+    return res.json({ success: true, message: `Mensaje enviado a ${to}` });
+  } else {
+    return res.status(500).json({ success: false, error: "No se pudo enviar el mensaje por WhatsApp. Comprueba las credenciales en Secrets." });
+  }
 });
 
 // Endpoint para obtener información y enlace del Bot de Telegram
@@ -679,6 +707,54 @@ async function handleTelegramIncomingMessage(token: string, message: any) {
   // Modo actual del chat
   const currentMode = telegramChatModes.get(chatId) || 'obraclima';
 
+  // 0. Inicio con parámetro Deep Linking de Lead de Pontevedra (ej: /start lead_xxx)
+  if (userText.startsWith('/start ') && userText.length > 7) {
+    const startParam = userText.replace('/start ', '').trim();
+    const leadMatch = findLeadByIdOrParam(startParam);
+    if (leadMatch) {
+      const biz = leadMatch.business;
+      const mini = leadMatch.miniApp;
+      const appName = mini?.appName || `${biz.name} AI`;
+      const tokenQuery = mini?.token ? `?token=${mini.token}` : '';
+      const miniappUrl = `${appUrl}/miniapp/${biz.id}${tokenQuery}`;
+
+      const isDeployed = Boolean(mini?.isDeployedToTelegram);
+      const leadWelcome = isDeployed
+        ? `🎉 *¡MiniApp Oficial y Privada Desplegada!* 🚀
+
+Hola, equipo de *${biz.name}*. Vuestro Asistente Inteligente ya está **100% activo en producción** en Telegram:
+
+• 🏢 *${biz.name}* (${biz.municipality})
+• 📋 Catálogo oficial de *${biz.primary_category}* con tarifas y cálculo automático de IVA
+• ⚡ Asistente con IA para cotizaciones rápidas por dictado de voz y texto
+• 📄 Generación de presupuestos y facturas en PDF con membrete
+• 🔑 Tu Clave de Acceso Privada: \`${mini?.accessCode || 'VIGO-ACCESO'}\`
+
+Pulsa el botón inferior para abrir tu MiniApp directamente aquí dentro:`
+        : `¡Hola, equipo de *${biz.name}*! 🏢✨
+
+Te damos la bienvenida a tu **MiniApp Inteligente y Privada** en Telegram.
+Hemos configurado tu entorno a medida para el sector de *${biz.primary_category}* en *${biz.municipality}*:
+
+• 📋 **Presupuestos y Cotizaciones**: Con precios oficiales de tu sector y cálculo automático de IVA.
+• ⚡ **Asistente por Voz y Texto**: Dicta los trabajos en obra y la IA desglosa materiales y mano de obra.
+• 📄 **PDFs Oficiales con Membrete**: Listos para enviar a tus clientes por WhatsApp o correo.
+• 🔑 **Acceso Privado**: Tu espacio está protegido con tu código exclusivo: \`${mini?.accessCode || 'VIGO-ACCESO'}\`.
+
+Toca el botón inferior para abrir tu MiniApp directamente aquí dentro:`;
+
+      await sendTelegramMessage(token, chatId, leadWelcome, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: `🚀 Abrir ${appName}`, web_app: { url: miniappUrl } }],
+            [{ text: "🔑 Ver mi Código de Acceso", callback_data: `lead_code_${biz.id}` }]
+          ]
+        }
+      });
+      return;
+    }
+  }
+
   // 1. Comandos de inicio / menú
   if (userText === '/start' || userText === '/obraclima' || userText === '/menu' || userText.toLowerCase() === 'hola') {
     telegramChatModes.set(chatId, 'obraclima');
@@ -1066,6 +1142,34 @@ async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
 
   console.log(`[Telegram Callback] Chat ${chatId} presionó: ${data}`);
   await answerTelegramCallbackQuery(token, callbackId);
+
+  if (data.startsWith('lead_code_')) {
+    const leadId = data.replace('lead_code_', '').trim();
+    const leadMatch = findLeadByIdOrParam(leadId);
+    if (leadMatch) {
+      const biz = leadMatch.business;
+      const mini = leadMatch.miniApp;
+      const code = mini?.accessCode || 'VIGO-ACCESO';
+      const tokenQuery = mini?.token ? `?token=${mini.token}` : '';
+      const miniappUrl = `${appUrl}/miniapp/${biz.id}${tokenQuery}`;
+      
+      const codeMsg = `🔐 *CLAVES DE ACCESO PRIVADO*
+Empresa: *${biz.name}*
+Código PIN: \`${code}\`
+Enlace directo: ${miniappUrl}
+
+Guarda este código para acceder a tu panel desde cualquier navegador o dispositivo.`;
+
+      await sendTelegramMessage(token, chatId, codeMsg, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: `🚀 Abrir ${mini?.appName || 'MiniApp'}`, web_app: { url: miniappUrl } }]
+          ]
+        }
+      });
+      return;
+    }
+  }
 
   if (data === 'oc_menu') {
     await sendTelegramMessage(token, chatId, "🏢 *Menú Principal de ObraClima AI:*", {
