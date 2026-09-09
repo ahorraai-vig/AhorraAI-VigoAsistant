@@ -25,13 +25,20 @@ import {
   ShieldCheck,
   Phone,
   Link2,
-  AlertCircle
+  AlertCircle,
+  Database,
+  Layers,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Check
 } from 'lucide-react';
 import { adminFetch } from '../../../lib/apiAuth';
 import PrintTemplate from './components/PrintTemplate';
 import DocumentEditor from './components/DocumentEditor';
 import EmailModal from './components/EmailModal';
 import NewClientModal from './components/NewClientModal';
+import { ProspectedList } from './components/ProspectedList';
 
 // Declare Telegram WebApp types
 declare global {
@@ -81,26 +88,71 @@ export default function ObraClimaMiniApp() {
   const [selectedClientId, setSelectedClientId] = useState<string>('c1');
   const [showNewClientModal, setShowNewClientModal] = useState(false);
 
-  // Estado aislado para Ingresar Producto por URL (Scraper Universal y Masivo)
+  // Catálogo y Cerebro IA / Prospectados State
+  const [catalogSubView, setCatalogSubView] = useState<'oficial' | 'prospectados'>('oficial');
+  const [prospectados, setProspectados] = useState<any[]>([]);
+  const [loadingProspectados, setLoadingProspectados] = useState(false);
+  const [prospectadosSearch, setProspectadosSearch] = useState('');
+  const [expandedDescId, setExpandedDescId] = useState<string | null>(null);
+
+  // Modal / Formulario para incorporar producto a tarifas oficiales
+  const [showAddOfficialModal, setShowAddOfficialModal] = useState(false);
+  const [officialFormData, setOfficialFormData] = useState({
+    code: '',
+    name: '',
+    category: 'Equipos',
+    price: 0,
+    unit: 'ud'
+  });
+  const [savingOfficial, setSavingOfficial] = useState(false);
+  const [officialSuccessMsg, setOfficialSuccessMsg] = useState<string | null>(null);
+
+  // Estado para Ingresar Producto por URL o HTML (Scraper Universal y Masivo)
   const [showUrlModal, setShowUrlModal] = useState(false);
+  const [scrapeMode, setScrapeMode] = useState<'url' | 'html'>('url');
   const [scrapeUrlInput, setScrapeUrlInput] = useState('');
+  const [scrapeHtmlInput, setScrapeHtmlInput] = useState('');
   const [scrapingUrl, setScrapingUrl] = useState(false);
   const [scrapeMsg, setScrapeMsg] = useState<string | null>(null);
   const [scrapeErr, setScrapeErr] = useState<string | null>(null);
   const [lastScrapedProduct, setLastScrapedProduct] = useState<any | null>(null);
 
+  const loadProspectados = async () => {
+    setLoadingProspectados(true);
+    try {
+      const res = await adminFetch('/api/obraclima/prospectados');
+      const data = await res.json();
+      if (data && Array.isArray(data.items)) {
+        setProspectados(data.items);
+      }
+    } catch (err) {
+      console.warn('Error cargando prospectados:', err);
+    } finally {
+      setLoadingProspectados(false);
+    }
+  };
+
   const handleMiniScrape = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!scrapeUrlInput.trim()) return;
+    if (scrapeMode === 'url' && !scrapeUrlInput.trim()) return;
+    if (scrapeMode === 'html' && !scrapeHtmlInput.trim()) return;
     setScrapingUrl(true);
     setScrapeMsg(null);
     setScrapeErr(null);
     setLastScrapedProduct(null);
     try {
-      const res = await adminFetch('/api/obraclima/prospectar-url', {
+      let endpoint = '/api/obraclima/prospectar-url';
+      let body: any = { url: scrapeUrlInput.trim() };
+
+      if (scrapeMode === 'html') {
+        endpoint = '/api/obraclima/prospectar-html';
+        body = { html: scrapeHtmlInput.trim(), url: scrapeUrlInput.trim() || undefined };
+      }
+
+      const res = await adminFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: scrapeUrlInput.trim() })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -110,11 +162,61 @@ export default function ObraClimaMiniApp() {
       if (data.product || data.sampleProduct) {
         setLastScrapedProduct(data.product || data.sampleProduct);
       }
-      setScrapeUrlInput('');
+      if (scrapeMode === 'url') setScrapeUrlInput('');
+      if (scrapeMode === 'html') setScrapeHtmlInput('');
+
+      // Recargar lista de prospectados para ver de inmediato el producto ingresado
+      await loadProspectados();
     } catch (err: any) {
       setScrapeErr(err.message || 'Error al conectar con el scraper.');
     } finally {
       setScrapingUrl(false);
+    }
+  };
+
+  const handleAdoptToOfficial = (item: any) => {
+    const newCode = item.sku || `PR-${Math.floor(1000 + Math.random() * 9000)}`;
+    setOfficialFormData({
+      code: newCode,
+      name: item.nombre,
+      category: item.categoria || 'Equipos',
+      price: Number(item.precio) || 0,
+      unit: 'ud'
+    });
+    setOfficialSuccessMsg(null);
+    setShowAddOfficialModal(true);
+  };
+
+  const handleSaveOfficialItem = async () => {
+    if (!officialFormData.name.trim()) return;
+    setSavingOfficial(true);
+    setOfficialSuccessMsg(null);
+    try {
+      const res = await adminFetch('/api/obraclima/catalog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(officialFormData)
+      });
+      const newItem = await res.json();
+      setCatalog(prev => [...prev, newItem]);
+      setOfficialSuccessMsg(`¡"${officialFormData.name}" incorporado con éxito a las tarifas oficiales!`);
+      setTimeout(() => {
+        setShowAddOfficialModal(false);
+        setOfficialSuccessMsg(null);
+      }, 1200);
+    } catch (err: any) {
+      alert(`Error guardando en tarifas oficiales: ${err.message}`);
+    } finally {
+      setSavingOfficial(false);
+    }
+  };
+
+  const handleOpenProductUrl = (url: string) => {
+    if (!url) return;
+    if (typeof window !== 'undefined' && window.Telegram?.WebApp?.openLink) {
+      window.Telegram.WebApp.openLink(url);
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -127,18 +229,29 @@ export default function ObraClimaMiniApp() {
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.ready();
       window.Telegram.WebApp.expand();
+      const rawInitData = (window.Telegram.WebApp as any).initData;
+      if (rawInitData) {
+        localStorage.setItem('obraclima_telegram_init_data', rawInitData);
+      }
     }
-
-    // Set auth token in localStorage for adminFetch
-    localStorage.setItem('obraclima_token', 'obraclima-telegram-miniapp');
 
     loadData();
 
     // Check URL params
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
-    if (tabParam && ['presupuestos', 'facturas', 'ai', 'clientes', 'catalogo', 'config'].includes(tabParam)) {
-      setActiveTab(tabParam as any);
+    if (tabParam && ['presupuestos', 'facturas', 'ai', 'clientes', 'catalogo', 'config', 'prospectados', 'cerebroia'].includes(tabParam)) {
+      if (tabParam === 'prospectados' || tabParam === 'cerebroia') {
+        setActiveTab('catalogo');
+        setCatalogSubView('prospectados');
+      } else {
+        setActiveTab(tabParam as any);
+      }
+    }
+    const subtabParam = params.get('subtab');
+    if (subtabParam === 'prospectados' || subtabParam === 'cerebroia') {
+      setActiveTab('catalogo');
+      setCatalogSubView('prospectados');
     }
     const docId = params.get('id');
     if (docId) {
@@ -153,12 +266,13 @@ export default function ObraClimaMiniApp() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [bRes, iRes, cRes, catRes, confRes] = await Promise.all([
+      const [bRes, iRes, cRes, catRes, confRes, prospRes] = await Promise.all([
         adminFetch('/api/obraclima/budgets').then(r => r.json()).catch(() => []),
         adminFetch('/api/obraclima/invoices').then(r => r.json()).catch(() => []),
         adminFetch('/api/obraclima/clients').then(r => r.json()).catch(() => []),
         adminFetch('/api/obraclima/catalog').then(r => r.json()).catch(() => []),
-        adminFetch('/api/obraclima/config').then(r => r.json()).catch(() => null)
+        adminFetch('/api/obraclima/config').then(r => r.json()).catch(() => null),
+        adminFetch('/api/obraclima/prospectados').then(r => r.json()).catch(() => ({ items: [] }))
       ]);
 
       setBudgets(Array.isArray(bRes) ? bRes : []);
@@ -166,6 +280,9 @@ export default function ObraClimaMiniApp() {
       setClients(Array.isArray(cRes) ? cRes : []);
       setCatalog(Array.isArray(catRes) ? catRes : []);
       if (confRes) setConfig(confRes);
+      if (prospRes && Array.isArray(prospRes.items)) {
+        setProspectados(prospRes.items);
+      }
     } catch (err) {
       console.error('[ObraClimaMiniApp Load Error]:', err);
     } finally {
@@ -238,6 +355,18 @@ export default function ObraClimaMiniApp() {
     const name = (i.customer?.name || i.client?.name || '').toLowerCase();
     const num = (i.number || '').toLowerCase();
     return name.includes(q) || num.includes(q);
+  });
+
+  const filteredProspectados = prospectados.filter(p => {
+    if (!prospectadosSearch.trim()) return true;
+    const term = prospectadosSearch.toLowerCase();
+    return (
+      (p.nombre || '').toLowerCase().includes(term) ||
+      (p.sku || '').toLowerCase().includes(term) ||
+      (p.categoria || '').toLowerCase().includes(term) ||
+      (p.descripcion || '').toLowerCase().includes(term) ||
+      (p.origen_url || '').toLowerCase().includes(term)
+    );
   });
 
   return (
@@ -713,36 +842,104 @@ export default function ObraClimaMiniApp() {
           </div>
         )}
 
-        {/* TAB 5: CATÁLOGO */}
+        {/* TAB 5: CATÁLOGO Y CEREBRO IA / PROSPECTADOS */}
         {activeTab === 'catalogo' && (
           <div className="space-y-4">
-            <div className="flex justify-between items-start">
+            {/* Header del apartado */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-bold text-white">Catálogo de Tarifas ({catalog.length})</h2>
-                <p className="text-xs text-slate-400">Precios de referencia utilizados por la IA</p>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <span>
+                    {catalogSubView === 'oficial' 
+                      ? `Tarifas Oficiales ObraClima (${catalog.length})` 
+                      : `Cerebro IA / Prospectados (${prospectados.length})`}
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400">
+                  {catalogSubView === 'oficial'
+                    ? 'Precios y partidas oficiales utilizadas en presupuestos y facturación'
+                    : 'Referencias y precios de mercado extraídos automáticamente de proveedores'}
+                </p>
               </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUrlModal(!showUrlModal);
+                    setScrapeMsg(null);
+                    setScrapeErr(null);
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                  title="Extraer productos desde URL o código HTML de proveedores"
+                >
+                  <Link2 size={14} />
+                  <span>Ingresar Producto / Dominio</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOfficialFormData({
+                      code: `PR-${Math.floor(1000 + Math.random() * 9000)}`,
+                      name: '',
+                      category: 'Equipos',
+                      price: 0,
+                      unit: 'ud'
+                    });
+                    setOfficialSuccessMsg(null);
+                    setShowAddOfficialModal(true);
+                  }}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                  title="Añadir nuevo ítem al catálogo oficial"
+                >
+                  <Plus size={14} />
+                  <span>Nuevo Ítem Oficial</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Selector de Subvistas: Tarifas Oficiales vs Cerebro IA / Prospectados */}
+            <div className="flex items-center gap-2 p-1 bg-slate-950/80 rounded-xl border border-slate-800">
               <button
                 type="button"
-                onClick={() => {
-                  setShowUrlModal(!showUrlModal);
-                  setScrapeMsg(null);
-                  setScrapeErr(null);
-                }}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition shadow-sm"
+                onClick={() => setCatalogSubView('oficial')}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 ${
+                  catalogSubView === 'oficial'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                }`}
               >
-                <Link2 size={14} />
-                <span>Ingresar Producto por URL</span>
+                <Layers size={14} />
+                <span>Tarifas Oficiales ({catalog.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCatalogSubView('prospectados')}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 ${
+                  catalogSubView === 'prospectados'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'text-emerald-400 hover:text-emerald-300 hover:bg-slate-800/80'
+                }`}
+              >
+                <Database size={14} />
+                <span>Cerebro IA / Prospectados ({prospectados.length})</span>
               </button>
             </div>
 
-            {/* Panel aislado Ingresar Producto por URL */}
+            {/* Panel de Prospección Inteligente (URL o HTML) */}
             {showUrlModal && (
-              <div className="bg-emerald-950/40 border border-emerald-700/50 rounded-xl p-3.5 space-y-2.5">
+              <div className="bg-emerald-950/40 border border-emerald-700/50 rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                    <Link2 size={14} />
-                    <span>Prospección por URL o Dominio</span>
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <Link2 size={15} />
+                      <span>Prospección y Captura Inteligente</span>
+                    </span>
+                    <span className="text-[10px] bg-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded border border-emerald-700/60 font-mono">
+                      Cerebro IA ObraClima
+                    </span>
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
@@ -751,27 +948,105 @@ export default function ObraClimaMiniApp() {
                       setScrapeErr(null);
                       setLastScrapedProduct(null);
                     }}
-                    className="text-[11px] text-slate-400 hover:text-white"
+                    className="text-xs text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800"
                   >
-                    Cerrar
+                    <X size={15} />
                   </button>
                 </div>
-                <form onSubmit={handleMiniScrape} className="flex gap-2">
-                  <input
-                    type="url"
-                    required
-                    placeholder="https://www.bricocentrovigo.es/ o URL producto"
-                    value={scrapeUrlInput}
-                    onChange={(e) => setScrapeUrlInput(e.target.value)}
-                    className="flex-1 bg-slate-900 border border-emerald-800/60 rounded-lg px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
-                  />
+
+                {/* Modos de Prospección: URL vs HTML DevTools */}
+                <div className="flex gap-2 text-xs border-b border-emerald-800/50 pb-2">
                   <button
-                    type="submit"
-                    disabled={scrapingUrl}
-                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shrink-0 disabled:opacity-50 transition"
+                    type="button"
+                    onClick={() => setScrapeMode('url')}
+                    className={`px-3 py-1 rounded font-semibold transition ${
+                      scrapeMode === 'url' ? 'bg-emerald-700 text-white' : 'text-emerald-300 hover:bg-emerald-900/40'
+                    }`}
                   >
-                    {scrapingUrl ? 'Extrayendo...' : 'Prospectar'}
+                    Por URL o Dominio
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setScrapeMode('html')}
+                    className={`px-3 py-1 rounded font-semibold transition ${
+                      scrapeMode === 'html' ? 'bg-emerald-700 text-white' : 'text-emerald-300 hover:bg-emerald-900/40'
+                    }`}
+                  >
+                    Pegar HTML (Inspector)
+                  </button>
+                </div>
+
+                <form onSubmit={handleMiniScrape} className="space-y-2.5">
+                  {scrapeMode === 'url' ? (
+                    <div>
+                      <p className="text-[11px] text-slate-300 mb-1.5">
+                        Introduce la URL de un producto o el dominio principal de la tienda (ej. <em>https://www.bricocentrovigo.es/...</em>).
+                        El sistema extrae precio, referencia, descripción técnica y lo sincroniza con el Cerebro IA.
+                      </p>
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          required
+                          placeholder="https://www.bricocentrovigo.es/ o URL producto..."
+                          value={scrapeUrlInput}
+                          onChange={(e) => setScrapeUrlInput(e.target.value)}
+                          className="flex-1 bg-slate-900 border border-emerald-800/60 rounded-lg px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          type="submit"
+                          disabled={scrapingUrl}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shrink-0 disabled:opacity-50 transition flex items-center gap-1.5"
+                        >
+                          {scrapingUrl ? (
+                            <>
+                              <Loader2 size={13} className="animate-spin" />
+                              <span>Extrayendo...</span>
+                            </>
+                          ) : (
+                            <span>Prospectar</span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-[11px] text-slate-300 mb-1.5">
+                        Pega el código HTML de la ficha del producto copiado desde las DevTools del navegador.
+                        El parser extraerá de inmediato título, precio, referencia y características técnicas.
+                      </p>
+                      <textarea
+                        required
+                        rows={4}
+                        placeholder="Pega aquí el código HTML (<div class='product-info'>...)"
+                        value={scrapeHtmlInput}
+                        onChange={(e) => setScrapeHtmlInput(e.target.value)}
+                        className="w-full bg-slate-900 border border-emerald-800/60 rounded-lg p-2.5 text-xs text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                      />
+                      <div className="flex gap-2 mt-2">
+                        <input
+                          type="url"
+                          placeholder="URL de origen (opcional, para guardar el enlace directo)"
+                          value={scrapeUrlInput}
+                          onChange={(e) => setScrapeUrlInput(e.target.value)}
+                          className="flex-1 bg-slate-900 border border-emerald-800/60 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          type="submit"
+                          disabled={scrapingUrl}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shrink-0 disabled:opacity-50 transition flex items-center gap-1.5"
+                        >
+                          {scrapingUrl ? (
+                            <>
+                              <Loader2 size={13} className="animate-spin" />
+                              <span>Procesando...</span>
+                            </>
+                          ) : (
+                            <span>Procesar HTML</span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </form>
 
                 {scrapeMsg && (
@@ -789,9 +1064,9 @@ export default function ObraClimaMiniApp() {
                 )}
 
                 {lastScrapedProduct && (
-                  <div className="p-3 bg-slate-900/90 border border-emerald-500/40 rounded-lg text-xs space-y-1.5">
+                  <div className="p-3 bg-slate-900/90 border border-emerald-500/40 rounded-lg text-xs space-y-2">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-mono text-emerald-400 font-bold">
+                      <span className="font-mono text-emerald-400 font-bold bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">
                         Ref: {lastScrapedProduct.sku || 'S/R'}
                       </span>
                       <span className="text-emerald-300 font-bold text-sm">
@@ -804,38 +1079,70 @@ export default function ObraClimaMiniApp() {
                         {lastScrapedProduct.descripcion}
                       </div>
                     )}
-                    <div className="text-[10px] text-emerald-400 flex items-center gap-1">
-                      <span>🧠 Sincronizado con el Cerebro de ObraClima</span>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                        <span>🧠 Sincronizado con el Cerebro de ObraClima</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleAdoptToOfficial(lastScrapedProduct)}
+                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold flex items-center gap-1 transition"
+                      >
+                        <Plus size={12} />
+                        <span>Añadir a Catálogo Oficial</span>
+                      </button>
                     </div>
                   </div>
                 )}
               </div>
             )}
 
-            <div className="grid gap-3">
-              {catalog.map((item) => (
-                <div key={item.id || item.code} className="bg-slate-800/80 border border-slate-700 rounded-xl p-4 flex items-center justify-between">
-                  <div className="pr-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-mono text-xs font-bold text-blue-400 bg-blue-900/40 px-2 py-0.5 rounded border border-blue-800/50">
-                        {item.code}
-                      </span>
-                      <span className="text-[10px] text-slate-400 bg-slate-700 px-2 py-0.5 rounded">
-                        {item.category || 'General'}
-                      </span>
-                    </div>
-                    <h3 className="text-sm font-semibold text-white leading-snug">{item.name}</h3>
-                  </div>
+            {/* VISTA 1: CEREBRO IA / PROSPECTADOS */}
+            {catalogSubView === 'prospectados' && (
+              <ProspectedList
+                items={prospectados}
+                loading={loadingProspectados}
+                onRefresh={loadProspectados}
+                onAdoptToOfficial={handleAdoptToOfficial}
+                onOpenUrl={handleOpenProductUrl}
+              />
+            )}
 
-                  <div className="text-right whitespace-nowrap">
-                    <div className="font-bold text-base text-emerald-400">
-                      {Number(item.price).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+            {/* VISTA 2: TARIFAS OFICIALES */}
+            {catalogSubView === 'oficial' && (
+              <div className="space-y-3">
+                <div className="grid gap-3">
+                  {catalog.map((item) => (
+                    <div key={item.id || item.code} className="bg-slate-800/80 border border-slate-700 rounded-xl p-4 flex items-center justify-between">
+                      <div className="pr-4">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-mono text-xs font-bold text-blue-400 bg-blue-900/40 px-2 py-0.5 rounded border border-blue-800/50">
+                            {item.code}
+                          </span>
+                          <span className="text-[10px] text-slate-400 bg-slate-700 px-2 py-0.5 rounded">
+                            {item.category || 'General'}
+                          </span>
+                        </div>
+                        <h3 className="text-sm font-semibold text-white leading-snug">{item.name}</h3>
+                      </div>
+
+                      <div className="text-right whitespace-nowrap">
+                        <div className="font-bold text-base text-emerald-400">
+                          {Number(item.price).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                        </div>
+                        <div className="text-[10px] text-slate-400">por {item.unit} (+{item.iva || 21}% IVA)</div>
+                      </div>
                     </div>
-                    <div className="text-[10px] text-slate-400">por {item.unit} (+{item.iva || 21}% IVA)</div>
-                  </div>
+                  ))}
+
+                  {catalog.length === 0 && (
+                    <div className="p-8 text-center bg-slate-800/40 rounded-xl border border-slate-700 text-slate-400 text-xs">
+                      No hay tarifas oficiales registradas aún.
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1019,6 +1326,134 @@ export default function ObraClimaMiniApp() {
           }
         }}
       />
+
+      {/* MODAL ADOPTAR A TARIFAS OFICIALES O CREAR NUEVO ÍTEM */}
+      {showAddOfficialModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 overflow-y-auto flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Package className="text-blue-400" size={18} />
+                <h3 className="text-base font-bold text-white">Incorporar a Tarifas Oficiales</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddOfficialModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {officialSuccessMsg ? (
+              <div className="p-4 bg-emerald-950/80 border border-emerald-600 rounded-xl text-center space-y-2">
+                <CheckCircle2 size={24} className="text-emerald-400 mx-auto" />
+                <p className="text-sm font-bold text-white">{officialSuccessMsg}</p>
+                <p className="text-xs text-emerald-300">Ya está disponible para presupuestos y facturación.</p>
+              </div>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSaveOfficialItem();
+                }}
+                className="space-y-3 text-xs"
+              >
+                <div>
+                  <label className="block text-slate-400 mb-1">Código / Referencia:</label>
+                  <input
+                    type="text"
+                    required
+                    value={officialFormData.code}
+                    onChange={(e) => setOfficialFormData({ ...officialFormData, code: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1">Nombre / Partida Oficial:</label>
+                  <input
+                    type="text"
+                    required
+                    value={officialFormData.name}
+                    onChange={(e) => setOfficialFormData({ ...officialFormData, name: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-400 mb-1">Categoría:</label>
+                    <select
+                      value={officialFormData.category}
+                      onChange={(e) => setOfficialFormData({ ...officialFormData, category: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="Equipos">Equipos</option>
+                      <option value="Instalación">Instalación</option>
+                      <option value="Material">Material</option>
+                      <option value="Mano de Obra">Mano de Obra</option>
+                      <option value="Servicios">Servicios</option>
+                      <option value="General">General</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1">Unidad:</label>
+                    <input
+                      type="text"
+                      required
+                      value={officialFormData.unit}
+                      onChange={(e) => setOfficialFormData({ ...officialFormData, unit: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1">Precio (€):</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={officialFormData.price}
+                    onChange={(e) => setOfficialFormData({ ...officialFormData, price: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-base font-bold focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddOfficialModal(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingOfficial}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {savingOfficial ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Guardando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={14} />
+                        <span>Guardar en Tarifas Oficiales</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );

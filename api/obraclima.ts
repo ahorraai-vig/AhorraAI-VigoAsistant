@@ -8,6 +8,25 @@ import {
   sendOfficialEmailWithNativePdfAttachment
 } from "./obraclima_pdf_mailer";
 import { setupObraClimaScraperRoutes, inMemoryProspeccion } from "./obraclima_scraper";
+import {
+  getConfig as repoGetConfig,
+  updateConfig,
+  getClients as repoGetClients,
+  getClientById as repoGetClientById,
+  createClient as repoCreateClient,
+  getOfficialCatalog,
+  createOfficialCatalogItem,
+  getProspectedCatalog,
+  getBudgets as repoGetBudgets,
+  getBudgetById as repoGetBudgetById,
+  createBudget as repoCreateBudget,
+  updateBudget as repoUpdateBudget,
+  convertBudgetToInvoice as repoConvertBudgetToInvoice,
+  getInvoices as repoGetInvoices,
+  getInvoiceById as repoGetInvoiceById,
+  createInvoice as repoCreateInvoice
+} from "../server/services/obraclima/repo";
+import { resolveProductCard, cacheProductImageOnDemand } from "../server/services/obraclima/productCardPolicy";
 
 // Helper to initialize Supabase client for secure backend operations
 export function getSupabaseClient() {
@@ -21,33 +40,7 @@ export function getSupabaseClient() {
 
 // Secure client resolver: fetches customer PII from Supabase (or fallback local DB) in backend only
 export async function getClientById(clientId: string) {
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('id', clientId)
-        .maybeSingle();
-
-      if (!error && data) {
-        return {
-          id: data.id,
-          name: data.name,
-          address: data.address || '',
-          postalCode: data.postal_code || data.postalCode || '',
-          city: data.city || 'Vigo',
-          province: data.province || 'Pontevedra',
-          nif: data.nif || data.cif || '',
-          phone: data.phone || '',
-          email: data.email || ''
-        };
-      }
-    } catch (err) {
-      console.warn('[Supabase getClientById fallback]:', err);
-    }
-  }
-  return db.clients.find(c => c.id === clientId) || db.clients[0] || {
+  return (await repoGetClientById(clientId)) || {
     id: "c-default",
     name: "Cliente Particular",
     address: "Vigo",
@@ -110,101 +103,40 @@ export const db = {
 
 // === HELPER FUNCTIONS FOR OBRACLIMA & TELEGRAM ===
 
-export function getBudgets() {
-  return db.budgets;
+export async function getBudgets() {
+  return await repoGetBudgets();
 }
 
-export function getBudgetById(id: string) {
-  return db.budgets.find(b => b.id === id || b.number === id);
+export async function getBudgetById(id: string) {
+  return await repoGetBudgetById(id);
 }
 
-export function getInvoices() {
-  return db.invoices;
+export async function getInvoices() {
+  return await repoGetInvoices();
 }
 
-export function getInvoiceById(id: string) {
-  return db.invoices.find(i => i.id === id || i.number === id);
+export async function getInvoiceById(id: string) {
+  return await repoGetInvoiceById(id);
 }
 
-export function getClients() {
-  return db.clients;
+export async function getClients() {
+  return await repoGetClients();
 }
 
-export function getCatalog() {
-  return db.catalog;
+export async function getCatalog() {
+  return await getOfficialCatalog();
 }
 
-export function getConfig() {
-  return db.config;
+export async function getConfig() {
+  return await repoGetConfig();
 }
 
-export function createBudget(data: any) {
-  const number = `${db.config.nextBudgetNumber.toString().padStart(3, '0')}/${db.config.budgetSeries.slice(-2)}`;
-  db.config.nextBudgetNumber++;
-  
-  let subtotal = 0;
-  const items = (data.items || []).map((item: any) => {
-    const q = Number(item.quantity) || 1;
-    const p = Number(item.unitPrice ?? item.price) || 0;
-    subtotal += q * p;
-    return {
-      description: item.description || item.name || 'Partida de trabajo',
-      quantity: q,
-      unitPrice: p
-    };
-  });
-
-  const ivaRate = Number(db.config.defaultIva || 21);
-  const tax = subtotal * (ivaRate / 100);
-  const total = subtotal + tax;
-
-  const budget = {
-    id: crypto.randomUUID(),
-    number,
-    date: new Date().toISOString(),
-    status: 'Borrador',
-    client: data.client || null,
-    customer: data.customer || null,
-    items,
-    subtotal,
-    tax,
-    total,
-    notes: data.notes || '',
-    ...data
-  };
-
-  db.budgets.unshift(budget);
-  return budget;
+export async function createBudget(data: any) {
+  return await repoCreateBudget(data);
 }
 
-export function convertBudgetToInvoice(budgetId: string) {
-  const idx = db.budgets.findIndex(b => b.id === budgetId || b.number === budgetId);
-  if (idx === -1) return null;
-
-  const budget = db.budgets[idx];
-  if (budget.convertedToInvoice) {
-    const existing = db.invoices.find(i => i.budgetReference === budget.number);
-    if (existing) return existing;
-  }
-
-  const number = `${db.config.nextInvoiceNumber.toString().padStart(3, '0')}/${db.config.invoiceSeries.slice(-2)}`;
-  db.config.nextInvoiceNumber++;
-
-  const invoice = {
-    ...budget,
-    id: crypto.randomUUID(),
-    number,
-    date: new Date().toISOString(),
-    status: 'Emitida',
-    budgetReference: budget.number
-  };
-
-  db.invoices.unshift(invoice);
-  db.budgets[idx].convertedToInvoice = true;
-  db.budgets[idx].invoiceReference = number;
-  db.budgets[idx].status = 'Facturado';
-
-  return invoice;
+export async function convertBudgetToInvoice(budgetId: string) {
+  return await repoConvertBudgetToInvoice(budgetId);
 }
 
 // === RGPD / GDPR SANITIZATION & PSEUDONYMIZATION ===
@@ -263,16 +195,21 @@ export async function parseBudgetWithAi(promptText: string) {
   // Pre-filter prompt to eliminate any PII before it leaves the backend
   const { sanitizedPrompt } = sanitizePromptForAi(promptText);
 
-  // Combinar catálogo oficial con productos y referencias recopiladas de prospección (Cerebro ObraClima)
-  const prospectedItems = inMemoryProspeccion.slice(0, 40).map(p => ({
+  // Combinar catálogo oficial con productos y referencias recopiladas de prospección (Cerebro ObraClima) desde el repo
+  const [officialCatalog, prospectedRaw] = await Promise.all([
+    getOfficialCatalog(),
+    getProspectedCatalog()
+  ]);
+
+  const prospectedItems = prospectedRaw.slice(0, 50).map(p => ({
     code: p.sku || `PROV-${(p.nombre || 'ITEM').slice(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
     category: p.categoria || 'Suministros y Proveedores',
     name: p.nombre,
-    description: p.descripcion ? `${p.nombre} (${p.descripcion.slice(0, 160)})` : p.nombre,
+    description: p.description_short || (p.descripcion ? `${p.nombre} (${p.descripcion.slice(0, 160)})` : p.nombre),
     unitPrice: p.precio,
     unit: 'ud'
   }));
-  const fullBrainCatalog = [...db.catalog, ...prospectedItems];
+  const fullBrainCatalog = [...officialCatalog, ...prospectedItems];
 
   const systemPrompt = `Eres el asistente técnico de estimación de ObraClima S.L. (Vigo) para valoración de obras, reformas, climatización y fontanería.
 
@@ -574,42 +511,36 @@ export function renderDocumentHtml(doc: any, type: 'presupuesto' | 'factura', co
 
 export function setupObraClimaRoutes(app: any, requireAdmin: any) {
 
-  // Auth checker supporting Telegram MiniApp token or standard Supabase Admin
+  // Auth checker supporting Telegram HMAC validation or Supabase Admin Bearer
   async function checkAuth(req: any, res: any): Promise<boolean> {
-    const tgAuth = req.headers['x-obraclima-auth'] || req.headers['x-telegram-auth'] || req.query.tg_auth;
-    const botSecret = process.env.TELEGRAM_BOT_TOKEN 
-      ? Buffer.from(process.env.TELEGRAM_BOT_TOKEN).toString('base64').slice(0, 32)
-      : 'obraclima-mini-token';
-
-    if (tgAuth && (tgAuth === botSecret || tgAuth === 'obraclima-telegram-miniapp' || tgAuth === 'valid')) {
-      return true;
-    }
     return await requireAdmin(req, res);
   }
 
-  // Public Telegram Bot metadata endpoint
+  // Public Telegram Bot metadata endpoint (NO tokens fijos ni secretos expuestos)
   app.get('/api/obraclima/telegram-info', (req: any, res: any) => {
     const appUrl = process.env.APP_URL || 'https://ais-dev-tvkcd5ffewortczttmdp2n-511583726387.europe-west2.run.app';
-    const botSecret = process.env.TELEGRAM_BOT_TOKEN 
-      ? Buffer.from(process.env.TELEGRAM_BOT_TOKEN).toString('base64').slice(0, 32)
-      : 'obraclima-mini-token';
 
     res.json({
       botUsername: 'ahorraaivigoasistant_bot',
       telegramWebUrl: 'https://web.telegram.org/k/#@ahorraaivigoasistant_bot',
       telegramAppUrl: 'https://t.me/ahorraaivigoasistant_bot',
       miniAppUrl: `${appUrl}/obraclima-miniapp`,
-      hasBotToken: !!process.env.TELEGRAM_BOT_TOKEN,
-      miniAppSecret: botSecret
+      hasBotToken: !!process.env.TELEGRAM_BOT_TOKEN
     });
   });
 
   // Standalone Printable Document HTML route (works in any browser and inside Telegram webview)
-  app.get(['/api/obraclima/print/:type/:id', '/print/:type/:id'], (req: any, res: any) => {
+  app.get(['/api/obraclima/print/:type/:id', '/print/:type/:id'], async (req: any, res: any) => {
     const { type, id } = req.params;
-    const doc = type === 'factura' 
-      ? db.invoices.find(i => i.id === id || i.number === id) 
-      : db.budgets.find(b => b.id === id || b.number === id);
+    const config = await getConfig();
+    let doc: any = null;
+    if (type === 'factura') {
+      const invoices = await getInvoices();
+      doc = invoices.find((i: any) => i.id === id || i.number === id);
+    } else {
+      const budgets = await getBudgets();
+      doc = budgets.find((b: any) => b.id === id || b.number === id);
+    }
 
     if (!doc) {
       return res.status(404).send(`<!DOCTYPE html><html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
@@ -619,7 +550,7 @@ export function setupObraClimaRoutes(app: any, requireAdmin: any) {
       </body></html>`);
     }
 
-    const html = renderDocumentHtml(doc, type as any, db.config);
+    const html = renderDocumentHtml(doc, type as any, config);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   });
@@ -627,101 +558,88 @@ export function setupObraClimaRoutes(app: any, requireAdmin: any) {
   // -- CONFIG --
   app.get('/api/obraclima/config', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    res.json(db.config);
+    const cfg = await getConfig();
+    res.json(cfg);
   });
   app.put('/api/obraclima/config', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    db.config = { ...db.config, ...req.body };
-    res.json(db.config);
+    const cfg = await updateConfig(req.body);
+    res.json(cfg);
   });
 
   // -- CLIENTS --
   app.get('/api/obraclima/clients', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.from('clients').select('*').order('name');
-        if (!error && data && data.length > 0) {
-          const mapped = data.map((c: any) => ({
-            id: c.id,
-            name: c.name,
-            address: c.address || '',
-            postalCode: c.postal_code || c.postalCode || '',
-            city: c.city || 'Vigo',
-            province: c.province || 'Pontevedra',
-            nif: c.nif || c.cif || '',
-            phone: c.phone || '',
-            email: c.email || ''
-          }));
-          return res.json(mapped);
-        }
-      } catch (err) {
-        console.warn('[Supabase getClients fallback]:', err);
-      }
-    }
-    res.json(db.clients);
+    const clients = await getClients();
+    res.json(clients);
   });
   app.post('/api/obraclima/clients', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    const client = { id: crypto.randomUUID(), ...req.body };
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.from('clients').insert([{
-          id: client.id,
-          name: client.name,
-          nif: client.nif,
-          address: client.address,
-          postal_code: client.postalCode,
-          city: client.city,
-          province: client.province,
-          phone: client.phone,
-          email: client.email
-        }]);
-      } catch (err) {
-        console.warn('[Supabase client insert error]:', err);
-      }
-    }
-    db.clients.push(client);
+    const client = await repoCreateClient(req.body);
     res.json(client);
   });
 
-  // -- CATALOG --
+  // -- CATALOG (OFICIAL) --
   app.get('/api/obraclima/catalog', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    res.json(db.catalog);
+    const catalog = await getOfficialCatalog();
+    res.json(catalog);
   });
   app.post('/api/obraclima/catalog', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    const item = { id: crypto.randomUUID(), ...req.body };
-    db.catalog.push(item);
+    const item = await createOfficialCatalogItem(req.body);
     res.json(item);
+  });
+
+  // -- PRODUCT CARDS & ON-DEMAND IMAGE CACHING --
+  app.get('/api/obraclima/product-card/:id', async (req: any, res: any) => {
+    if (!(await checkAuth(req, res))) return;
+    try {
+      const card = await resolveProductCard(req.params.id);
+      if (!card) return res.status(404).json({ success: false, error: 'Producto no encontrado' });
+      return res.json({ success: true, card });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/obraclima/cache-product-image', async (req: any, res: any) => {
+    if (!(await checkAuth(req, res))) return;
+    try {
+      const { productId, imageUrl } = req.body;
+      if (!productId || !imageUrl) {
+        return res.status(400).json({ success: false, error: 'productId e imageUrl son requeridos' });
+      }
+      const cachedUrl = await cacheProductImageOnDemand(productId, imageUrl);
+      return res.json({ success: true, cached_image_url: cachedUrl });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   // -- BUDGETS --
   app.get('/api/obraclima/budgets', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    res.json(db.budgets);
+    const budgets = await getBudgets();
+    res.json(budgets);
   });
 
   app.post('/api/obraclima/budgets', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    const budget = createBudget(req.body);
+    const budget = await repoCreateBudget(req.body);
     res.json(budget);
   });
 
   app.put('/api/obraclima/budgets/:id', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    const idx = db.budgets.findIndex(b => b.id === req.params.id);
-    if (idx === -1) return res.status(404).json({ error: "Presupuesto no encontrado" });
-    db.budgets[idx] = { ...db.budgets[idx], ...req.body };
-    res.json(db.budgets[idx]);
+    const updated = await repoUpdateBudget(req.params.id, req.body);
+    if (!updated) return res.status(404).json({ error: "Presupuesto no encontrado" });
+    res.json(updated);
   });
 
   app.post('/api/obraclima/budgets/:id/convert', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    const invoice = convertBudgetToInvoice(req.params.id);
+    const invoice = await repoConvertBudgetToInvoice(req.params.id);
     if (!invoice) return res.status(404).json({ error: "Presupuesto no encontrado" });
     res.json({ success: true, invoice });
   });
@@ -729,15 +647,13 @@ export function setupObraClimaRoutes(app: any, requireAdmin: any) {
   // -- INVOICES --
   app.get('/api/obraclima/invoices', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    res.json(db.invoices);
+    const invoices = await getInvoices();
+    res.json(invoices);
   });
 
   app.post('/api/obraclima/invoices', async (req: any, res: any) => {
     if (!(await checkAuth(req, res))) return;
-    const number = `${db.config.nextInvoiceNumber.toString().padStart(3, '0')}/${db.config.invoiceSeries.slice(-2)}`;
-    db.config.nextInvoiceNumber++;
-    const invoice = { id: crypto.randomUUID(), number, date: new Date().toISOString(), status: 'Emitida', ...req.body };
-    db.invoices.unshift(invoice);
+    const invoice = await repoCreateInvoice(req.body);
     res.json(invoice);
   });
 
@@ -756,14 +672,15 @@ export function setupObraClimaRoutes(app: any, requireAdmin: any) {
       const technicalResult = await parseBudgetWithAi(sanitizedPrompt);
 
       // 3. Consulta de PII en Supabase/BD en entorno seguro de backend
-      const targetClientId = clientId || db.clients[0]?.id || 'c1';
+      const clientsList = await getClients();
+      const targetClientId = clientId || clientsList[0]?.id || 'c1';
       const client = await getClientById(targetClientId);
 
       // 4. Fusión local en el servidor (backend assembly)
-      const newBudget = createBudget({
+      const newBudget = await createBudget({
         customer: client,
         client: client,
-        clientId: client.id,
+        clientId: client?.id,
         items: technicalResult.items || [],
         notes: technicalResult.notes || ''
       });
@@ -861,9 +778,10 @@ Devuelve SOLO JSON (sin markdown):
   app.post("/api/obraclima/generate-courtesy", async (req: any, res: any) => {
     try {
       const { doc, docId, type = 'presupuesto' } = req.body;
-      const targetDoc = doc || (type === 'factura'
-        ? db.invoices.find(i => i.id === docId || i.number === docId)
-        : db.budgets.find(b => b.id === docId || b.number === docId));
+      let targetDoc = doc;
+      if (!targetDoc && docId) {
+        targetDoc = type === 'factura' ? await getInvoiceById(docId) : await getBudgetById(docId);
+      }
 
       if (!targetDoc) {
         return res.status(404).json({ error: "Documento no encontrado para redactar el texto de cortesía." });
@@ -880,20 +798,22 @@ Devuelve SOLO JSON (sin markdown):
   app.post("/api/obraclima/generate-pdf", async (req: any, res: any) => {
     try {
       const { doc, docId, type = 'presupuesto' } = req.body;
-      const targetDoc = doc || (type === 'factura'
-        ? db.invoices.find(i => i.id === docId || i.number === docId)
-        : db.budgets.find(b => b.id === docId || b.number === docId));
+      let targetDoc = doc;
+      if (!targetDoc && docId) {
+        targetDoc = type === 'factura' ? await getInvoiceById(docId) : await getBudgetById(docId);
+      }
 
       if (!targetDoc) {
         return res.status(404).json({ error: "Documento no encontrado para generar PDF." });
       }
 
+      const currentConfig = await getConfig();
       const docTitle = type === 'factura' ? 'Factura' : 'Presupuesto';
       const docNum = (targetDoc.number || '000').replace(/[\/\\]/g, '-');
       const filename = `${docTitle}_${docNum}_ObraClima.pdf`;
 
       // 1. Generar binario PDF oficial A4
-      const pdfBuffer = await generateBudgetPdfBuffer(targetDoc, type, db.config);
+      const pdfBuffer = await generateBudgetPdfBuffer(targetDoc, type, currentConfig);
 
       // 2. Guardar temporalmente en Bucket de Supabase Storage
       const storageResult = await uploadPdfToSupabaseStorage(pdfBuffer, filename);
@@ -917,14 +837,16 @@ Devuelve SOLO JSON (sin markdown):
   app.post(["/api/obraclima/send-email", "/api/obraclima/send-budget"], async (req: any, res: any) => {
     try {
       const { to, subject, body, doc, docId, type = 'presupuesto' } = req.body;
-      const targetDoc = doc || (type === 'factura' 
-        ? db.invoices.find(i => i.id === docId || i.number === docId)
-        : db.budgets.find(b => b.id === docId || b.number === docId));
+      let targetDoc = doc;
+      if (!targetDoc && docId) {
+        targetDoc = type === 'factura' ? await getInvoiceById(docId) : await getBudgetById(docId);
+      }
 
       if (!targetDoc) {
         return res.status(404).json({ error: "Documento de presupuesto o factura no encontrado." });
       }
 
+      const currentConfig = await getConfig();
       const docNum = targetDoc.number || docId || 'documento';
       const docTitle = type === 'factura' ? 'Factura' : 'Presupuesto';
       const clientName = targetDoc.customer?.name || targetDoc.client?.name || 'Cliente';
@@ -937,7 +859,7 @@ Devuelve SOLO JSON (sin markdown):
       }
 
       // 2. Generar el archivo PDF binario de forma nativa
-      const pdfBuffer = await generateBudgetPdfBuffer(targetDoc, type, db.config);
+      const pdfBuffer = await generateBudgetPdfBuffer(targetDoc, type, currentConfig);
 
       // 3. Guardar temporalmente en el Bucket de Supabase Storage
       const storageResult = await uploadPdfToSupabaseStorage(pdfBuffer, filename);
@@ -988,6 +910,6 @@ Devuelve SOLO JSON (sin markdown):
     }
   });
 
-  // Integrar rutas de prospección masiva y scraping de catálogos
-  setupObraClimaScraperRoutes(app);
+  // Integrar rutas de prospección masiva y scraping de catálogos con control de autenticación
+  setupObraClimaScraperRoutes(app, checkAuth);
 }

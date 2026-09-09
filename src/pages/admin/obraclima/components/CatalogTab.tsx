@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
+import { ProspectedList } from './ProspectedList';
 
 export function CatalogTab({ catalog, refresh }: { catalog: any[], refresh: () => void }) {
   const [showAdd, setShowAdd] = useState(false);
@@ -32,8 +33,6 @@ export function CatalogTab({ catalog, refresh }: { catalog: any[], refresh: () =
   const [activeCatalogView, setActiveCatalogView] = useState<'oficial' | 'prospectados'>('oficial');
   const [prospectados, setProspectados] = useState<any[]>([]);
   const [loadingProspectados, setLoadingProspectados] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [expandedDescId, setExpandedDescId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     code: '',
@@ -137,19 +136,6 @@ export function CatalogTab({ catalog, refresh }: { catalog: any[], refresh: () =
     setShowAdd(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-
-  // Filtrado de prospectados
-  const filteredProspectados = prospectados.filter(p => {
-    if (!searchTerm.trim()) return true;
-    const term = searchTerm.toLowerCase();
-    return (
-      (p.nombre || '').toLowerCase().includes(term) ||
-      (p.sku || '').toLowerCase().includes(term) ||
-      (p.categoria || '').toLowerCase().includes(term) ||
-      (p.descripcion || '').toLowerCase().includes(term) ||
-      (p.origen_url || '').toLowerCase().includes(term)
-    );
-  });
 
   return (
     <div className="max-w-5xl">
@@ -412,29 +398,6 @@ export function CatalogTab({ catalog, refresh }: { catalog: any[], refresh: () =
             <span>Cerebro IA / Prospectados ({prospectados.length})</span>
           </button>
         </div>
-
-        {activeCatalogView === 'prospectados' && (
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Buscar por nombre, SKU, tienda..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 w-52 sm:w-64"
-              />
-            </div>
-            <button
-              onClick={loadProspectados}
-              disabled={loadingProspectados}
-              title="Actualizar lista de prospección"
-              className="p-1.5 text-slate-500 hover:text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 transition"
-            >
-              <RefreshCw size={14} className={loadingProspectados ? 'animate-spin text-emerald-600' : ''} />
-            </button>
-          </div>
-        )}
       </div>
 
       {/* VISTA 1: Catálogo Oficial */}
@@ -472,109 +435,13 @@ export function CatalogTab({ catalog, refresh }: { catalog: any[], refresh: () =
 
       {/* VISTA 2: Catálogo de Prospección (Alimentación del Cerebro de ObraClima) */}
       {activeCatalogView === 'prospectados' && (
-        <div className="space-y-3">
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Database size={16} className="text-emerald-700 shrink-0" />
-              <span>
-                Estos productos y referencias técnicas alimentan el <strong>Cerebro IA de ObraClima</strong> al calcular presupuestos y contrastar tarifas reales de mercado en Vigo y Galicia.
-              </span>
-            </div>
-            <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-md">
-              {filteredProspectados.length} Registros
-            </span>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                <tr>
-                  <th className="p-3 font-semibold w-28">Ref / SKU</th>
-                  <th className="p-3 font-semibold">Producto y Especificaciones</th>
-                  <th className="p-3 font-semibold w-32">Proveedor / Origen</th>
-                  <th className="p-3 font-semibold w-24 text-right">Precio</th>
-                  <th className="p-3 font-semibold w-28 text-center">Acción</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredProspectados.map((p: any) => {
-                  let hostname = 'Proveedor';
-                  try { hostname = new URL(p.origen_url).hostname.replace(/^www\./, ''); } catch {}
-                  const isExpanded = expandedDescId === p.id;
-
-                  return (
-                    <React.Fragment key={p.id || p.origen_url}>
-                      <tr className="hover:bg-slate-50/80 transition">
-                        <td className="p-3 align-top font-mono text-xs font-semibold text-emerald-800">
-                          {p.sku || <span className="text-slate-400 font-normal italic">S/R</span>}
-                        </td>
-                        <td className="p-3 align-top">
-                          <div className="font-semibold text-slate-900 text-sm">{p.nombre}</div>
-                          {p.categoria && (
-                            <div className="text-[11px] text-slate-500 mt-0.5">{p.categoria}</div>
-                          )}
-                          {p.descripcion && (
-                            <button
-                              type="button"
-                              onClick={() => setExpandedDescId(isExpanded ? null : p.id)}
-                              className="text-[11px] text-emerald-700 hover:text-emerald-900 flex items-center gap-0.5 mt-1 font-medium"
-                            >
-                              <span>{isExpanded ? 'Ocultar detalles' : 'Ver ficha técnica completa'}</span>
-                              {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                            </button>
-                          )}
-                        </td>
-                        <td className="p-3 align-top text-xs text-slate-600">
-                          <a
-                            href={p.origen_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 hover:underline flex items-center gap-1 font-medium truncate max-w-[130px]"
-                            title={p.origen_url}
-                          >
-                            <span className="truncate">{hostname}</span>
-                            <ExternalLink size={11} className="shrink-0" />
-                          </a>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            {new Date(p.fecha_captura || Date.now()).toLocaleDateString('es-ES')}
-                          </div>
-                        </td>
-                        <td className="p-3 align-top font-bold text-slate-900 text-right whitespace-nowrap">
-                          {Number(p.precio).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
-                        </td>
-                        <td className="p-3 align-top text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleAdoptToOfficial(p)}
-                            className="px-2 py-1 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 rounded text-xs font-medium transition"
-                            title="Copiar a tarifas oficiales de ObraClima"
-                          >
-                            + Catálogo
-                          </button>
-                        </td>
-                      </tr>
-                      {isExpanded && p.descripcion && (
-                        <tr className="bg-slate-50/60 border-t border-slate-100">
-                          <td colSpan={5} className="p-3 pl-8">
-                            <div className="text-xs text-slate-700 whitespace-pre-line bg-white p-3 rounded-lg border border-slate-200">
-                              <span className="font-semibold text-slate-900 block mb-1">Especificaciones Técnicas & Medidas:</span>
-                              {p.descripcion}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-            {filteredProspectados.length === 0 && (
-              <div className="p-8 text-center text-slate-500 text-xs">
-                {searchTerm ? 'No se encontraron productos con ese filtro.' : 'No hay productos prospectados aún. Introduce una URL arriba para comenzar.'}
-              </div>
-            )}
-          </div>
-        </div>
+        <ProspectedList
+          items={prospectados}
+          loading={loadingProspectados}
+          onRefresh={loadProspectados}
+          onAdoptToOfficial={handleAdoptToOfficial}
+          onOpenUrl={(url) => window.open(url, '_blank')}
+        />
       )}
     </div>
   );

@@ -13,10 +13,13 @@
  */
 
 import * as cheerio from 'cheerio';
-import * as fs from 'fs';
-import * as path from 'path';
 import type { Express, Request, Response } from 'express';
 import { getSupabaseClient } from './obraclima';
+import { 
+  upsertProspectedItem, 
+  getProspectedCatalog, 
+  inMemoryDb 
+} from '../server/services/obraclima/repo';
 
 export interface ProspectProductRecord {
   id?: string;
@@ -25,18 +28,19 @@ export interface ProspectProductRecord {
   moneda: string;
   sku?: string | null;
   descripcion?: string | null;
+  description_short?: string | null;
   categoria?: string | null;
   origen_url: string;
+  image_url?: string | null;
+  image_cached_path?: string | null;
+  specs?: Array<{ label?: string; value: string }>;
   metodo_extraccion: string;
+  enrich_status?: 'pending' | 'ok' | 'failed' | 'stale';
   fecha_captura: string;
 }
 
-// Almacén en memoria de respaldo para disponibilidad inmediata
-export const inMemoryProspeccion: ProspectProductRecord[] = [];
-
-// Rutas fijas para exportación de seguridad opcional a Google Drive
-const GDRIVE_ROOT_CSV_PATH = '/content/drive/MyDrive/catalogo_extraido.csv';
-const GDRIVE_MASIVA_CSV_PATH = '/content/drive/MyDrive/prospeccion_masiva.csv';
+// Almacén en memoria de respaldo sincronizado
+export const inMemoryProspeccion = inMemoryDb.catalogProspected as unknown as ProspectProductRecord[];
 
 export const CRAWLER_INICIADO_MSG = '⏳ Iniciando prospección profunda del catálogo y alimentación del cerebro de ObraClima. Los datos de productos, referencias, precios y especificaciones técnicas se están extrayendo y sincronizando en segundo plano.';
 
@@ -132,6 +136,9 @@ export function extractProductDetails(html: string, originalUrl: string): {
   rawPrice: string;
   categoria: string;
   descripcion: string;
+  description_short: string | null;
+  image_url: string | null;
+  specs: Array<{ label?: string; value: string }>;
 } {
   const $ = cheerio.load(html);
 
@@ -211,7 +218,58 @@ export function extractProductDetails(html: string, originalUrl: string): {
 
   const descripcion = descParts.join('\n').slice(0, 3000);
 
-  // 5. Categoría
+  // 5. Descripción corta (summary limpio)
+  let description_short: string | null = null;
+  const shortEl = $('.woocommerce-product-details__short-description, .product-short-description, .short-description').first();
+  if (shortEl.length) {
+    description_short = cleanText(shortEl.text());
+  }
+  if (!description_short) {
+    const metaDesc = cleanText($('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content'));
+    if (metaDesc) description_short = metaDesc;
+  }
+  if (!description_short && descripcion) {
+    description_short = descripcion.slice(0, 240);
+  }
+  if (description_short && description_short.length > 300) {
+    description_short = description_short.slice(0, 300) + '...';
+  }
+
+  // 6. Imagen del producto (og:image o primera imagen)
+  let imageUrl: string | null = null;
+  const ogImg = $('meta[property="og:image"]').attr('content') || $('meta[name="twitter:image"]').attr('content');
+  if (ogImg) imageUrl = cleanText(ogImg);
+  if (!imageUrl) {
+    const firstImg = $('.woocommerce-product-gallery__image img, .woocommerce-main-image img, .product-images img, img.attachment-shop_single, .ficha-producto img, .product-detail img').first();
+    const src = firstImg.attr('src') || firstImg.attr('data-src') || firstImg.attr('data-lazy-src');
+    if (src) imageUrl = cleanText(src);
+  }
+  if (imageUrl && !imageUrl.startsWith('http') && !imageUrl.startsWith('data:')) {
+    try {
+      imageUrl = new URL(imageUrl, originalUrl).href;
+    } catch {}
+  }
+
+  // 7. Especificaciones estructuradas (specs)
+  const specs: Array<{ label: string; value: string }> = [];
+  $('table.woocommerce-product-attributes tr, table.shop_attributes tr, .ficha-tecnica tr, table.caracteristicas tr, .specs-table tr').each((_, el) => {
+    const label = cleanText($(el).find('th, td.label, .attribute-name').first().text());
+    const value = cleanText($(el).find('td, td.value, .attribute-value').last().text());
+    if (label && value && label !== value) {
+      specs.push({ label, value });
+    }
+  });
+  if (specs.length === 0) {
+    $('.caracteristicas li, .especificaciones li').each((_, el) => {
+      const text = cleanText($(el).text());
+      if (text.includes(':')) {
+        const [k, ...rest] = text.split(':');
+        specs.push({ label: cleanText(k), value: cleanText(rest.join(':')) });
+      }
+    });
+  }
+
+  // 8. Categoría
   let categoria = cleanText($('.migas, .breadcrumbs, .breadcrumb, nav.woocommerce-breadcrumb').text())
     .replace(/\s+/g, ' ')
     .replace(/\s*>\s*/g, ' / ')
@@ -227,7 +285,10 @@ export function extractProductDetails(html: string, originalUrl: string): {
     precio,
     rawPrice,
     categoria,
-    descripcion
+    descripcion,
+    description_short,
+    image_url: imageUrl,
+    specs
   };
 }
 
@@ -258,46 +319,28 @@ export function isDomainOrSitemapUrl(rawInput: string): boolean {
  */
 export async function persistProductToDatabase(
   record: ProspectProductRecord,
-  exportToGDrive = false
+  _exportToGDrive = false
 ): Promise<{ supabaseSuccess: boolean; knowledgeBaseSuccess: boolean }> {
-  const supabase = getSupabaseClient();
   let supabaseSuccess = false;
   let knowledgeBaseSuccess = false;
 
-  // Actualizar memoria local para visualización y uso inmediato
-  const existingIdx = inMemoryProspeccion.findIndex(p => p.origen_url === record.origen_url || (p.sku && p.sku === record.sku));
-  if (existingIdx >= 0) {
-    inMemoryProspeccion[existingIdx] = { ...inMemoryProspeccion[existingIdx], ...record };
-  } else {
-    inMemoryProspeccion.unshift(record);
+  // 1. Guardar en el Repositorio Central de ObraClima (Supabase obraclima_catalog_prospected o fallback en memoria)
+  try {
+    const upserted = await upsertProspectedItem({
+      ...record,
+      name: record.nombre
+    });
+    if (upserted?.id) {
+      record.id = upserted.id;
+      supabaseSuccess = true;
+    }
+  } catch (err: any) {
+    console.warn('[ObraClima repo upsert error]:', err.message);
   }
 
+  // 2. Dual-write a knowledge_base para fundamentación contextual del agente IA
+  const supabase = getSupabaseClient();
   if (supabase) {
-    // 1. Insertar en catalogo_prospeccion (las columnas exactas soportadas en el schema)
-    try {
-      const { data, error } = await supabase
-        .from('catalogo_prospeccion')
-        .insert([{
-          nombre: record.nombre,
-          precio: record.precio,
-          moneda: record.moneda || 'EUR',
-          sku: record.sku || null,
-          origen_url: record.origen_url,
-          metodo_extraccion: record.metodo_extraccion,
-          fecha_captura: record.fecha_captura
-        }])
-        .select()
-        .maybeSingle();
-
-      if (!error && data) {
-        record.id = data.id;
-        supabaseSuccess = true;
-      }
-    } catch (err: any) {
-      console.warn('[Supabase catalogo_prospeccion Insert Error]:', err.message);
-    }
-
-    // 2. Alimentar el "Cerebro de ObraClima" (knowledge_base) con toda la descripción técnica, medidas y referencias
     try {
       let hostname = '';
       try { hostname = new URL(record.origen_url).hostname.replace(/^www\./, ''); } catch {}
@@ -308,6 +351,7 @@ export async function persistProductToDatabase(
         `REFERENCIA / SKU: ${record.sku || 'N/A'}`,
         `PRECIO OFICIAL: ${record.precio} EUR`,
         record.categoria ? `CATEGORÍA: ${record.categoria}` : '',
+        record.description_short ? `RESUMEN: ${record.description_short}` : '',
         record.descripcion ? `ESPECIFICACIONES TÉCNICAS Y MEDIDAS:\n${record.descripcion}` : '',
         `URL ORIGINAL: ${record.origen_url}`,
         `FECHA CAPTURA: ${record.fecha_captura}`
@@ -327,39 +371,6 @@ export async function persistProductToDatabase(
     } catch (kbErr: any) {
       console.warn('[Supabase knowledge_base Insert Error]:', kbErr.message);
     }
-
-    // 3. Registrar en proveedores_materiales si aplica
-    try {
-      let hostname = 'Proveedor';
-      try { hostname = new URL(record.origen_url).hostname.replace(/^www\./, ''); } catch {}
-      await supabase
-        .from('proveedores_materiales')
-        .insert([{
-          proveedor_nombre: hostname,
-          categoria: record.categoria || 'Suministros y Climatización',
-          producto_sku_o_nombre: `${record.nombre} (${record.sku || 'S/R'})`,
-          precio_coste: record.precio,
-          url_referencia: record.origen_url,
-          updated_at: record.fecha_captura
-        }]);
-    } catch {}
-  }
-
-  // 4. Exportación opcional a Google Drive
-  if (exportToGDrive) {
-    try {
-      const gdriveFolder = path.dirname(GDRIVE_ROOT_CSV_PATH);
-      if (fs.existsSync(gdriveFolder)) {
-        const fileExists = fs.existsSync(GDRIVE_ROOT_CSV_PATH);
-        const csvLine = `"${record.nombre.replace(/"/g, '""')}",${record.precio},"EUR","${record.sku || ''}","${record.origen_url}","${record.metodo_extraccion}","${record.fecha_captura}"\n`;
-        if (!fileExists) {
-          const header = 'nombre,precio,moneda,sku,origen_url,metodo_extraccion,fecha_captura\n';
-          fs.writeFileSync(GDRIVE_ROOT_CSV_PATH, header + csvLine, 'utf-8');
-        } else {
-          fs.appendFileSync(GDRIVE_ROOT_CSV_PATH, csvLine, 'utf-8');
-        }
-      }
-    } catch {}
   }
 
   return { supabaseSuccess, knowledgeBaseSuccess };
@@ -395,13 +406,19 @@ export async function scrapeWooCommerceProduct(
   }
 
   const fechaCaptura = new Date().toISOString();
+  const enrichStatus: 'ok' | 'pending' = (extracted.nombre && extracted.precio > 0 && (extracted.image_url || extracted.description_short)) ? 'ok' : 'pending';
+
   const productRecord: ProspectProductRecord = {
     nombre: extracted.nombre,
     precio: extracted.precio,
     moneda: 'EUR',
     sku: extracted.ref,
     descripcion: extracted.descripcion,
+    description_short: extracted.description_short,
     categoria: extracted.categoria,
+    image_url: extracted.image_url,
+    specs: extracted.specs,
+    enrich_status: enrichStatus,
     origen_url: url,
     metodo_extraccion: method,
     fecha_captura: fechaCaptura
@@ -565,13 +582,15 @@ export async function startBackgroundSitemapCrawling(rawDomain: string) {
 }
 
 /**
- * Registro de rutas Express aisladas para el módulo de Scraper
+ * Registro de rutas Express aisladas para el módulo de Scraper con control de autenticación
  */
-export function setupObraClimaScraperRoutes(app: Express) {
+export function setupObraClimaScraperRoutes(app: Express, checkAuth?: any) {
   // Endpoint para procesar e ingresar producto por URL o dominio raíz
   app.post('/api/obraclima/prospectar-url', async (req: Request, res: Response) => {
+    if (checkAuth && !(await checkAuth(req, res))) return;
+
     try {
-      const { url, export_gdrive } = req.body;
+      const { url } = req.body;
       if (!url || typeof url !== 'string') {
         return res.status(400).json({ success: false, error: 'La URL o dominio del proveedor es obligatorio.' });
       }
@@ -580,10 +599,8 @@ export function setupObraClimaScraperRoutes(app: Express) {
 
       // Detección de dominio raíz o catálogo masivo
       if (isDomainOrSitemapUrl(trimmedUrl)) {
-        // Lanzar el proceso en segundo plano
         startBackgroundSitemapCrawling(trimmedUrl);
 
-        // Además, intentar extraer inmediatamente los primeros productos de la home para dar feedback instantáneo
         try {
           const { html: rootHtml } = await fetchWithResilience(trimmedUrl);
           const $ = cheerio.load(rootHtml);
@@ -602,8 +619,7 @@ export function setupObraClimaScraperRoutes(app: Express) {
           });
 
           if (sampleLinks.length > 0) {
-            // Extraer el primer producto inmediatamente
-            const firstResult = await scrapeWooCommerceProduct(sampleLinks[0], !!export_gdrive);
+            const firstResult = await scrapeWooCommerceProduct(sampleLinks[0], false);
             return res.json({
               success: true,
               isBackground: true,
@@ -621,7 +637,7 @@ export function setupObraClimaScraperRoutes(app: Express) {
       }
 
       // Ficha individual de producto
-      const result = await scrapeWooCommerceProduct(trimmedUrl, !!export_gdrive);
+      const result = await scrapeWooCommerceProduct(trimmedUrl, false);
       return res.json({
         success: true,
         message: result.formattedMessage,
@@ -637,8 +653,10 @@ export function setupObraClimaScraperRoutes(app: Express) {
 
   // Endpoint para procesar directamente código HTML pegado desde el inspector (bypass total de bloqueos)
   app.post('/api/obraclima/prospectar-html', async (req: Request, res: Response) => {
+    if (checkAuth && !(await checkAuth(req, res))) return;
+
     try {
-      const { html, url, export_gdrive } = req.body;
+      const { html, url } = req.body;
       if (!html || typeof html !== 'string') {
         return res.status(400).json({ success: false, error: 'El código HTML del producto es obligatorio.' });
       }
@@ -650,19 +668,25 @@ export function setupObraClimaScraperRoutes(app: Express) {
         return res.status(422).json({ success: false, error: 'No se pudo identificar el título del producto en el HTML proporcionado.' });
       }
 
+      const enrichStatus: 'ok' | 'pending' = (extracted.nombre && extracted.precio > 0 && (extracted.image_url || extracted.description_short)) ? 'ok' : 'pending';
+
       const productRecord: ProspectProductRecord = {
         nombre: extracted.nombre,
         precio: extracted.precio,
         moneda: 'EUR',
         sku: extracted.ref,
         descripcion: extracted.descripcion,
+        description_short: extracted.description_short,
         categoria: extracted.categoria,
+        image_url: extracted.image_url,
+        specs: extracted.specs,
+        enrich_status: enrichStatus,
         origen_url: effectiveUrl,
         metodo_extraccion: 'manual_inspector_html_v1',
         fecha_captura: new Date().toISOString()
       };
 
-      await persistProductToDatabase(productRecord, !!export_gdrive);
+      await persistProductToDatabase(productRecord, false);
 
       return res.json({
         success: true,
@@ -674,31 +698,13 @@ export function setupObraClimaScraperRoutes(app: Express) {
     }
   });
 
-  // Endpoint para listar todos los productos prospectados
+  // Endpoint para listar todos los productos prospectados (fuente única de verdad repo)
   app.get('/api/obraclima/prospectados', async (req: Request, res: Response) => {
+    if (checkAuth && !(await checkAuth(req, res))) return;
+
     try {
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        const { data, error } = await supabase
-          .from('catalogo_prospeccion')
-          .select('*')
-          .order('fecha_captura', { ascending: false });
-
-        if (!error && Array.isArray(data)) {
-          // Combinar con la memoria local para enriquecer con descripción técnica si está disponible
-          const enriched = data.map((item: any) => {
-            const inMem = inMemoryProspeccion.find(m => m.id === item.id || m.origen_url === item.origen_url);
-            return {
-              ...item,
-              descripcion: item.descripcion || inMem?.descripcion || null,
-              categoria: item.categoria || inMem?.categoria || null
-            };
-          });
-          return res.json({ success: true, items: enriched });
-        }
-      }
-
-      return res.json({ success: true, items: inMemoryProspeccion });
+      const items = await getProspectedCatalog();
+      return res.json({ success: true, items });
     } catch (err: any) {
       return res.status(500).json({ success: false, items: inMemoryProspeccion, error: err.message });
     }

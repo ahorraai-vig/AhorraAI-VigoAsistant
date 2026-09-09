@@ -14,6 +14,7 @@ import {
 } from './obraclima';
 import { setupObraClimaScraperRoutes, scrapeWooCommerceProduct, isDomainOrSitemapUrl, startBackgroundSitemapCrawling, CRAWLER_INICIADO_MSG } from './obraclima_scraper';
 import { setupPontevedraProspectorRoutes } from './pontevedra_prospector';
+import { validateTelegramInitData } from '../server/services/obraclima/telegramAuth';
 import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService, weatherProvider } from '../server/services/vigo';
 import { 
   vigoAgentPlanner, 
@@ -76,14 +77,58 @@ function getBusinessAccessCodeFromReq(req: express.Request): string | null {
   return null;
 }
 
-async function requireAdmin(req: express.Request, res: express.Response): Promise<boolean> {
-  const tgAuth = req.headers['x-obraclima-auth'] || req.headers['x-telegram-auth'] || req.query.tg_auth;
-  const botSecret = process.env.TELEGRAM_BOT_TOKEN 
-    ? Buffer.from(process.env.TELEGRAM_BOT_TOKEN).toString('base64').slice(0, 32)
-    : 'obraclima-mini-token';
+export async function requireObraClima(req: express.Request, res: express.Response): Promise<boolean> {
+  // 1. Telegram Mini App HMAC initData check
+  const rawInitData = (req.headers['x-telegram-init-data'] || req.query.tg_init_data) as string | undefined;
+  if (rawInitData) {
+    const result = validateTelegramInitData(rawInitData);
+    if (result.valid) {
+      (req as any).telegramUser = result.user;
+      return true;
+    }
+    res.status(401).json({ error: `Acceso denegado: ${result.error}` });
+    return false;
+  }
 
-  if (tgAuth && (tgAuth === botSecret || tgAuth === 'obraclima-telegram-miniapp' || tgAuth === 'valid')) {
-    return true;
+  // 2. Admin web Supabase Bearer token check
+  if (!supabase) {
+    res.status(503).json({ error: 'El servicio de autenticación no está disponible. Faltan credenciales de Supabase en el servidor.' });
+    return false;
+  }
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ error: 'Necesitas iniciar sesión como administrador de ObraClima.' });
+    return false;
+  }
+  const { data: userData, error } = await supabase.auth.getUser(token);
+  const user = userData?.user;
+  if (error || !user) {
+    res.status(401).json({ error: 'Sesión no válida o caducada. Vuelve a iniciar sesión.' });
+    return false;
+  }
+  let role: string | undefined = user.user_metadata?.role;
+  try {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    if (profile?.role) role = profile.role;
+  } catch (profileErr) {
+    console.warn('[requireObraClima profiles lookup]:', profileErr);
+  }
+  if (role !== 'admin') {
+    res.status(403).json({ error: 'No tienes permisos de administrador para esta acción.' });
+    return false;
+  }
+  (req as any).user = user;
+  return true;
+}
+
+async function requireAdmin(req: express.Request, res: express.Response): Promise<boolean> {
+  const rawInitData = (req.headers['x-telegram-init-data'] || req.query.tg_init_data) as string | undefined;
+  if (rawInitData) {
+    const result = validateTelegramInitData(rawInitData);
+    if (result.valid) {
+      (req as any).telegramUser = result.user;
+      return true;
+    }
   }
 
   if (!supabase) {
@@ -687,7 +732,7 @@ _(Escribe /obraclima en cualquier momento para volver a ObraClima)._`;
 
   // 3. Menú de Presupuestos
   if (userText === '/presupuestos' || userText === '📋 Presupuestos') {
-    const budgets = getBudgets();
+    const budgets = await getBudgets();
     if (budgets.length === 0) {
       await sendTelegramMessage(token, chatId, "📋 *No hay presupuestos registrados todavía.*\n\nPulsa en *⚡ Crear con IA* o escribe lo que necesitas presupuestar.", {
         reply_markup: getObraClimaInlineKeyboard()
@@ -722,7 +767,7 @@ _(Escribe /obraclima en cualquier momento para volver a ObraClima)._`;
 
   // 4. Menú de Facturas
   if (userText === '/facturas' || userText === '🧾 Facturas') {
-    const invoices = getInvoices();
+    const invoices = await getInvoices();
     if (invoices.length === 0) {
       await sendTelegramMessage(token, chatId, "🧾 *No hay facturas emitidas todavía.*\n\nPuedes convertir cualquier presupuesto aprobado a factura con un solo toque.", {
         reply_markup: getObraClimaInlineKeyboard()
@@ -756,7 +801,7 @@ _(Escribe /obraclima en cualquier momento para volver a ObraClima)._`;
 
   // 5. Clientes
   if (userText === '/clientes' || userText === '👥 Clientes') {
-    const clients = getClients();
+    const clients = await getClients();
     let msg = `👥 *CARTERA DE CLIENTES (${clients.length}):*\n\n`;
     clients.forEach((c) => {
       msg += `👤 *${c.name}*\n   NIF: \`${c.nif || 'Sin NIF'}\`\n   Dirección: ${c.address || '—'}, ${c.city || 'Vigo'}\n\n`;
@@ -775,7 +820,7 @@ _(Escribe /obraclima en cualquier momento para volver a ObraClima)._`;
 
   // 6. Catálogo
   if (userText === '/catalogo' || userText === '📦 Catálogo') {
-    const catalog = getCatalog();
+    const catalog = await getCatalog();
     let msg = `📦 *CATÁLOGO DE PRODUCTOS Y TARIFAS (${catalog.length} ítems):*\n\n`;
     catalog.forEach((item) => {
       msg += `• *\`${item.code}\`* ${item.name}\n  Precio: *${item.price} €* / ${item.unit} (+${item.iva}% IVA)\n\n`;
@@ -893,7 +938,7 @@ La IA de ObraClima cruzará tu texto con el catálogo de tarifas oficiales, calc
 
       // Fusión en Backend: asociar cliente de forma segura en servidor
       const client = obraClimaDb.clients[0] || { id: "c-default", name: "Cliente Particular", city: "Vigo" };
-      const budget = createBudget({
+      const budget = await createBudget({
         customer: client,
         client: client,
         clientId: client.id,
@@ -1014,7 +1059,7 @@ async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
   }
 
   if (data === 'oc_budgets') {
-    const budgets = getBudgets();
+    const budgets = await getBudgets();
     if (budgets.length === 0) {
       await sendTelegramMessage(token, chatId, "No hay presupuestos todavía.", {
         reply_markup: getObraClimaInlineKeyboard()
@@ -1037,7 +1082,7 @@ async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
   }
 
   if (data === 'oc_invoices') {
-    const invoices = getInvoices();
+    const invoices = await getInvoices();
     if (invoices.length === 0) {
       await sendTelegramMessage(token, chatId, "No hay facturas emitidas todavía.", {
         reply_markup: getObraClimaInlineKeyboard()
@@ -1059,7 +1104,7 @@ async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
   }
 
   if (data === 'oc_clients') {
-    const clients = getClients();
+    const clients = await getClients();
     let msg = `👥 *CLIENTES REGISTRADOS (${clients.length}):*\n\n`;
     clients.forEach((c) => {
       msg += `• *${c.name}* (NIF: \`${c.nif || '—'}\`)\n  📍 ${c.address || '—'}, ${c.city || 'Vigo'}\n`;
@@ -1076,7 +1121,7 @@ async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
   }
 
   if (data === 'oc_catalog') {
-    const catalog = getCatalog();
+    const catalog = await getCatalog();
     let msg = `📦 *CATÁLOGO DE TARIFAS (${catalog.length} ítems):*\n\n`;
     catalog.forEach((item) => {
       msg += `• *\`${item.code}\`* ${item.name} — *${item.price} €*\n`;
@@ -1100,7 +1145,7 @@ async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
   }
 
   if (data === 'oc_config') {
-    const conf = getConfig();
+    const conf = await getConfig();
     const msg = `🏢 *DATOS FISCALES DE EMPRESA:*
 
 *${conf.companyName}*
@@ -1132,7 +1177,7 @@ async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
   // Ver detalle de presupuesto
   if (data.startsWith('oc_view_b_')) {
     const id = data.replace('oc_view_b_', '');
-    const b = getBudgetById(id);
+    const b = await getBudgetById(id);
     if (!b) {
       await sendTelegramMessage(token, chatId, "Presupuesto no encontrado.");
       return;
@@ -1163,7 +1208,7 @@ async function handleTelegramCallbackQuery(token: string, callbackQuery: any) {
   // Convertir presupuesto a factura
   if (data.startsWith('oc_convert_')) {
     const id = data.replace('oc_convert_', '');
-    const invoice = convertBudgetToInvoice(id);
+    const invoice = await convertBudgetToInvoice(id);
     if (!invoice) {
       await sendTelegramMessage(token, chatId, "⚠️ No se pudo convertir el presupuesto a factura (posiblemente no exista).");
       return;
@@ -1197,7 +1242,7 @@ Ya puedes descargar el PDF oficial de la factura:`;
     const docType = parts[0] as 'presupuesto' | 'factura';
     const docId = parts.slice(1).join('_');
 
-    const doc = docType === 'factura' ? getInvoiceById(docId) : getBudgetById(docId);
+    const doc = docType === 'factura' ? await getInvoiceById(docId) : await getBudgetById(docId);
     if (!doc) {
       await sendTelegramMessage(token, chatId, "⚠️ No se encontró el documento especificado.");
       return;
@@ -3471,7 +3516,7 @@ Devuelve SIEMPRE y ÚNICAMENTE un JSON con esta estructura (no incluyas markdown
   }
 });
 
-setupObraClimaRoutes(app, requireAdmin);
-setupObraClimaScraperRoutes(app);
+setupObraClimaRoutes(app, requireObraClima);
+setupObraClimaScraperRoutes(app, requireObraClima);
 setupPontevedraProspectorRoutes(app, requireAdmin);
 export default app;
