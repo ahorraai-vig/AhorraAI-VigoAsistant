@@ -538,7 +538,7 @@ Instrucciones estrictas:
 5. Firma formalmente como el Departamento de Administración y Climatización de ObraClima S.L.
 6. NO devuelvas asunto, cabeceras ni bloques Markdown extra, devuelve directamente el cuerpo del mensaje listo para enviar.`;
 
-      const candidateModels = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
+      const candidateModels = ['gemini-3.8-flash', 'gemini-3.6-flash'];
       for (const modelName of candidateModels) {
         try {
           const response = await ai.models.generateContent({

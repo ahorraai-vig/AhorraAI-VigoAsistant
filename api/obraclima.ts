@@ -305,7 +305,7 @@ Devuelve OBLIGATORIAMENTE un JSON estricto con esta estructura:
   "notes": "Observaciones exclusivamente técnicas de instalación o montaje"
 }`;
 
-  const candidateModels = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"];
+  const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
   let lastError = null;
   let textResponse = "";
 
@@ -825,7 +825,7 @@ Devuelve SOLO JSON (sin markdown):
   "notes": ""
 }`;
 
-      const candidateModels = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"];
+      const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
       let lastError = null;
       let textResponse = "";
 

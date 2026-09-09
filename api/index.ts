@@ -13,6 +13,7 @@ import {
   parseBudgetWithAi 
 } from './obraclima';
 import { setupObraClimaScraperRoutes, scrapeWooCommerceProduct, isDomainOrSitemapUrl, startBackgroundSitemapCrawling, CRAWLER_INICIADO_MSG } from './obraclima_scraper';
+import { setupPontevedraProspectorRoutes } from './pontevedra_prospector';
 import { eventsService, mobilityService, catalogService, alertsService, geoService, tourismService, weatherProvider } from '../server/services/vigo';
 import { 
   vigoAgentPlanner, 
@@ -213,26 +214,31 @@ async function getAvailableGroqModels(apiKey: string): Promise<string[]> {
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.data) && data.data.length > 0) {
-        // Filtrar modelos de texto/chat descartando whisper, tts, embeddings, etc.
+        // Filtrar modelos de texto/chat descartando whisper, tts, embeddings, audio, modelos con acuerdos y qwen con cuota OTPM restrictiva
         const chatModels = data.data
           .map((m: any) => m.id as string)
           .filter((id: string) => 
             !id.includes('whisper') && 
             !id.includes('embed') && 
             !id.includes('tts') &&
-            !id.includes('guard')
+            !id.includes('guard') &&
+            !id.includes('canopylabs') &&
+            !id.includes('orpheus') &&
+            !id.includes('audio') &&
+            !id.includes('vision') &&
+            !id.includes('qwen') // Previene error 429 por límite estricto de 1000 OTPM en Groq free tier
           );
         
-        // Priorizar modelos potentes (70b, 3.3, 3.1, 8b, gemma)
+        // Priorizar modelos potentes y estables (llama-3.3-70b, llama-3.1-8b, gemma, llama-3.2)
         chatModels.sort((a: string, b: string) => {
           const score = (modelId: string) => {
             let s = 0;
-            if (modelId.includes('70b')) s += 50;
-            if (modelId.includes('llama-3.3')) s += 40;
-            if (modelId.includes('llama-3.1')) s += 30;
+            if (modelId.includes('llama-3.3-70b')) s += 60;
+            if (modelId.includes('llama-3.1-8b')) s += 50;
+            if (modelId.includes('70b')) s += 40;
+            if (modelId.includes('gemma2-9b')) s += 30;
             if (modelId.includes('llama-3.2')) s += 20;
             if (modelId.includes('8b')) s += 15;
-            if (modelId.includes('gemma')) s += 10;
             return s;
           };
           return score(b) - score(a);
@@ -290,7 +296,7 @@ async function callGroqChat(messages: Array<{ role: string; content: string }>, 
           model,
           messages: groqMessages,
           temperature: 0.7,
-          max_tokens: 1024
+          max_tokens: 800
         })
       });
 
@@ -417,7 +423,7 @@ const vigoTools = [{
 async function generateAIResponse(formattedMessages: Array<{ role: string; content: string; image?: string }>, systemInstruction: string): Promise<string> {
   // 1. Intentar primero con Gemini (@google/genai) probando modelos oficiales soportados en cascada
   if (ai) {
-    const geminiModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    const geminiModels = ['gemini-3.8-flash', 'gemini-3.6-flash'];
     for (const model of geminiModels) {
       try {
         const response = await ai.models.generateContent({
@@ -2511,23 +2517,22 @@ async function calculateSynergiesWithAI(businesses: MemoryCoopBusiness[]): Promi
 
   // 2. ENRIQUECIMIENTO CON IA (GEMINI) PARA GENERAR SINERGIAS CREATIVAS COMPLEJAS
   try {
-    // Tomamos una muestra balanceada de 20 negocios de diferentes sectores
-    const sampleBusinesses = businesses.slice(0, 25).map(b => ({
+    // Tomamos una muestra balanceada de 10 negocios clave de diferentes sectores para mantener el prompt y respuesta concisos
+    const sampleBusinesses = businesses.slice(0, 10).map(b => ({
       id: b.id,
       name: b.name,
       category: b.category,
       zone: b.zone,
-      idleCapacity: b.cooperation?.idleCapacity || [],
-      offers: b.cooperation?.offers || [],
-      needs: b.cooperation?.needs || [],
-      valleyHours: b.cooperation?.valleyHours || ''
+      idleCapacity: b.cooperation?.idleCapacity?.slice(0, 2) || [],
+      offers: b.cooperation?.offers?.slice(0, 2) || [],
+      needs: b.cooperation?.needs?.slice(0, 2) || []
     }));
 
     const prompt = `Eres el cerebro de Inteligencia Artificial del ecosistema "AhorraAI v4" en Vigo.
-Genera entre 6 y 12 sinergias comerciales INNOVADORAS Y RENTABLES cruzando los siguientes comercios de Vigo:
+Genera exactamente entre 3 y 5 sinergias comerciales breves, innovadoras y rentables cruzando estos comercios:
 ${JSON.stringify(sampleBusinesses, null, 2)}
 
-Devuelve EXCLUSIVAMENTE un JSON array con esta estructura:
+Devuelve EXCLUSIVAMENTE un JSON array con esta estructura (sé conciso):
 [
   {
     "businessA_id": "id",
@@ -2535,8 +2540,8 @@ Devuelve EXCLUSIVAMENTE un JSON array con esta estructura:
     "businessB_id": "id",
     "businessB_name": "nombre",
     "synergyType": "bono_cruzado",
-    "title": "Título",
-    "description": "Detalle",
+    "title": "Título corto",
+    "description": "Detalle breve",
     "benefitA": "Beneficio A",
     "benefitB": "Beneficio B",
     "compatibilityScore": 92
@@ -2553,10 +2558,30 @@ Devuelve EXCLUSIVAMENTE un JSON array con esta estructura:
       console.warn("[Synergy AI Generation Warning]: Fallback a heurísticas determinísticas:", aiGenErr);
     }
 
-    const cleanedJson = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
-    if (cleanedJson.startsWith('[')) {
-      const parsed = JSON.parse(cleanedJson);
-      if (Array.isArray(parsed)) {
+    if (generatedText) {
+      // Parser seguro con recuperación de JSON truncado
+      let parsed: any[] = [];
+      const cleaned = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const startIdx = cleaned.indexOf('[');
+      if (startIdx !== -1) {
+        const candidate = cleaned.slice(startIdx);
+        try {
+          const direct = JSON.parse(candidate);
+          if (Array.isArray(direct)) parsed = direct;
+        } catch {
+          // Recuperación de array JSON truncado: recortar hasta el último objeto cerrado y cerrar el array
+          const lastObjEnd = candidate.lastIndexOf('}');
+          if (lastObjEnd > 0) {
+            try {
+              const repaired = candidate.slice(0, lastObjEnd + 1) + ']';
+              const repParsed = JSON.parse(repaired);
+              if (Array.isArray(repParsed)) parsed = repParsed;
+            } catch {}
+          }
+        }
+      }
+
+      if (Array.isArray(parsed) && parsed.length > 0) {
         for (const s of parsed) {
           const bA = businesses.find(b => b.id === s.businessA_id) || { id: s.businessA_id, name: s.businessA_name } as any;
           const bB = businesses.find(b => b.id === s.businessB_id) || { id: s.businessB_id, name: s.businessB_name } as any;
@@ -2567,7 +2592,7 @@ Devuelve EXCLUSIVAMENTE un JSON array con esta estructura:
       }
     }
   } catch (err) {
-    console.warn("[AI Enhanced Synergy Generation Notice]:", err);
+    console.warn("[AI Enhanced Synergy Generation Notice]: Fallback determinístico activo.");
   }
 
   // Asegurar que siempre tengamos un set rico de sinergias
@@ -3285,17 +3310,28 @@ app.post("/api/agent/solar-prospect", async (req, res) => {
     if (!mapsKey) return res.status(503).json({ error: "GOOGLE_MAPS_API_KEY no configurada.", needsCredit: true });
 
     // 1. Usar Gemini para analizar la intención
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: `El usuario quiere prospectar tejados para energía solar. 
-      Petición: "${prompt}"
-      Extrae la intención:
-      1. search_query: La búsqueda optimizada para mapas (ej: "restaurantes en Navia, Vigo", o "Calle Príncipe 10, Vigo", o "36212 Vigo").
-      2. is_area_search: booleano, true si busca múltiples lugares en una zona (ej: "tejados de navia", "restaurantes en el centro"). false si es una dirección específica.
-      3. limit: número de lugares a analizar (por defecto 3, máximo 5 para evitar sobrepasar límites rápidos).
-      Responde en JSON con este formato exacto: {"search_query": "...", "is_area_search": true/false, "limit": 3}`,
-      config: { responseMimeType: "application/json" }
-    });
+    let response = null;
+    for (const modelName of ["gemini-3.8-flash", "gemini-3.6-flash"]) {
+      try {
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents: `El usuario quiere prospectar tejados para energía solar. 
+          Petición: "${prompt}"
+          Extrae la intención:
+          1. search_query: La búsqueda optimizada para mapas (ej: "restaurantes en Navia, Vigo", o "Calle Príncipe 10, Vigo", o "36212 Vigo").
+          2. is_area_search: booleano, true si busca múltiples lugares en una zona (ej: "tejados de navia", "restaurantes en el centro"). false si es una dirección específica.
+          3. limit: número de lugares a analizar (por defecto 3, máximo 5 para evitar sobrepasar límites rápidos).
+          Responde en JSON con este formato exacto: {"search_query": "...", "is_area_search": true/false, "limit": 3}`,
+          config: { responseMimeType: "application/json" }
+        });
+        if (response && response.text) break;
+      } catch (e) {
+        // intentar siguiente modelo
+      }
+    }
+    if (!response) {
+      return res.status(500).json({ error: "No se pudo obtener respuesta del modelo de IA" });
+    }
 
     const parsedText = response.text;
     let parsed;
@@ -3404,14 +3440,25 @@ Devuelve SIEMPRE y ÚNICAMENTE un JSON con esta estructura (no incluyas markdown
   "requiresReview": true
 }`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: [
-        { role: "user", parts: [{ text: systemPrompt }] },
-        { role: "user", parts: [{ text: "Descripción del trabajo: " + prompt }] }
-      ],
-      config: { responseMimeType: "application/json" }
-    });
+    let response = null;
+    for (const modelName of ["gemini-3.8-flash", "gemini-3.6-flash"]) {
+      try {
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents: [
+            { role: "user", parts: [{ text: systemPrompt }] },
+            { role: "user", parts: [{ text: "Descripción del trabajo: " + prompt }] }
+          ],
+          config: { responseMimeType: "application/json" }
+        });
+        if (response && response.text) break;
+      } catch (e) {
+        // intentar siguiente modelo
+      }
+    }
+    if (!response) {
+      return res.status(500).json({ error: "No se pudo obtener respuesta del modelo de IA" });
+    }
 
     try {
       const parsed = JSON.parse(response.text || "{}");
@@ -3426,4 +3473,5 @@ Devuelve SIEMPRE y ÚNICAMENTE un JSON con esta estructura (no incluyas markdown
 
 setupObraClimaRoutes(app, requireAdmin);
 setupObraClimaScraperRoutes(app);
+setupPontevedraProspectorRoutes(app, requireAdmin);
 export default app;

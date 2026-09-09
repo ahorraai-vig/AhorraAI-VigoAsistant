@@ -20,6 +20,7 @@ import AdminProspector from './pages/admin/AdminProspector';
 import AdminRoofProspecting from './pages/admin/AdminRoofProspecting';
 import ObraClimaDashboard from './pages/admin/obraclima/ObraClimaDashboard';
 import ObraClimaMiniApp from './pages/admin/obraclima/ObraClimaMiniApp';
+import AdminPontevedraProspector from './pages/admin/AdminPontevedraProspector';
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminDashboard />} />
           <Route path="prospector" element={<AdminProspector />} />
+          <Route path="pontevedra-prospector" element={<AdminPontevedraProspector />} />
           <Route path="solar" element={<AdminRoofProspecting />} />
           <Route path="obraclima" element={<ObraClimaDashboard />} />
           <Route path="cooperacion" element={<AdminCooperationGraph />} />

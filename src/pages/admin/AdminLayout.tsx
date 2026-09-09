@@ -1,5 +1,5 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Store, MessageSquare, Settings, LogOut, Menu, X, ArrowLeft, Handshake, MapPin, Bot, Sun, FileText } from 'lucide-react';
+import { LayoutDashboard, Store, MessageSquare, Settings, LogOut, Menu, X, ArrowLeft, Handshake, MapPin, Bot, Sun, FileText, HardHat } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
@@ -73,6 +73,7 @@ export default function AdminLayout() {
 
   const navItems = [
     { name: 'Dashboard', path: '/admin', icon: <LayoutDashboard size={20} />, roles: ['admin', 'business'] },
+    { name: 'Prospector Pontevedra', path: '/admin/pontevedra-prospector', icon: <HardHat size={20} />, roles: ['admin'] },
     { name: 'ObraClima AI', path: '/admin/obraclima', icon: <FileText size={20} />, roles: ['admin'] },
     { name: 'Agente Prospector', path: '/admin/prospector', icon: <Bot size={20} />, roles: ['admin'] },
     { name: 'Prospección Solar', path: '/admin/solar', icon: <Sun size={20} />, roles: ['admin'] },
